@@ -4,9 +4,9 @@
   "description": "Instant File Transfer & Smart Print Hub for XIE Students",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node --watch server.js"
-  },
+  "start": "node server.js",
+  "build": "cd client && npm install && npm run build"
+},
   "dependencies": {
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
