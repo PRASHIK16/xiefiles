@@ -1,0 +1,669 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>XIE Files — Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg:       #F1F5F9; --surface:  #FFFFFF; --primary: #2563EB; --primary-d: #1D4ED8;
+  --text:     #0F172A; --muted:    #64748B; --border:  #E2E8F0;
+  --radius:   12px; --radius-sm: 8px;
+  --shadow:   0 1px 3px rgba(0,0,0,.06), 0 4px 12px rgba(0,0,0,.05);
+  --green:#10B981; --green-bg:#ECFDF5; --amber:#F59E0B; --amber-bg:#FFFBEB;
+  --blue:#3B82F6; --blue-bg:#EFF6FF; --red:#EF4444; --red-bg:#FEF2F2;
+}
+html, body { height: 100%; font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); }
+
+/* ── LOGIN ─────────────────────────────────────────── */
+#login-screen {
+  display: flex; align-items: center; justify-content: center; min-height: 100vh;
+}
+.login-card {
+  background: var(--surface); border-radius: var(--radius); padding: 40px 36px;
+  width: 360px; box-shadow: 0 8px 40px rgba(0,0,0,.12);
+  display: flex; flex-direction: column; align-items: center; gap: 20px;
+}
+.login-icon { font-size: 40px; }
+.login-title { font-size: 20px; font-weight: 700; }
+.login-sub   { font-size: 13px; color: var(--muted); text-align: center; }
+.login-form  { width: 100%; display: flex; flex-direction: column; gap: 12px; }
+.login-input {
+  width: 100%; padding: 11px 14px; border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm); font-size: 14px; font-family: inherit; outline: none;
+  transition: border-color .18s;
+}
+.login-input:focus { border-color: var(--primary); }
+.login-btn {
+  padding: 11px; background: var(--primary); color: #fff; border: none;
+  border-radius: var(--radius-sm); font-size: 14px; font-weight: 600;
+  cursor: pointer; font-family: inherit; transition: background .18s;
+}
+.login-btn:hover { background: var(--primary-d); }
+#login-error { color: var(--red); font-size: 13px; text-align: center; display: none; }
+
+/* ── MAIN LAYOUT ───────────────────────────────────── */
+#app { display: none; flex-direction: column; min-height: 100vh; }
+
+header {
+  background: var(--primary); height: 56px;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 24px; position: sticky; top: 0; z-index: 100;
+  box-shadow: 0 2px 8px rgba(37,99,235,.3);
+}
+.header-logo { font-size: 16px; font-weight: 700; color: #fff; display: flex; align-items: center; gap: 8px; }
+.header-logo a { color: #fff; text-decoration: none; opacity: .7; font-size: 13px; }
+.header-right { display: flex; gap: 10px; align-items: center; }
+.logout-btn {
+  background: rgba(255,255,255,.15); border: none; color: #fff;
+  padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 12px;
+  font-family: inherit; font-weight: 500; transition: background .18s;
+}
+.logout-btn:hover { background: rgba(255,255,255,.25); }
+
+main { max-width: 1100px; margin: 0 auto; padding: 28px 20px 60px; width: 100%; }
+
+/* ── STATS GRID ─────────────────────────────────────── */
+.stats-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 12px; margin-bottom: 28px;
+}
+.stat-card {
+  background: var(--surface); border-radius: var(--radius); padding: 18px 20px;
+  box-shadow: var(--shadow); border: 1px solid var(--border);
+}
+.stat-label { font-size: 11.5px; color: var(--muted); font-weight: 500; margin-bottom: 6px; }
+.stat-value { font-size: 24px; font-weight: 700; color: var(--text); }
+.stat-sub   { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+/* ── CONTROLS BAR ───────────────────────────────────── */
+.controls {
+  display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px;
+  align-items: center;
+}
+.search-wrap { flex: 1; min-width: 200px; position: relative; }
+.search-wrap input {
+  width: 100%; padding: 9px 14px 9px 38px; border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm); font-size: 13.5px; font-family: inherit; outline: none;
+  background: var(--surface); transition: border-color .18s;
+}
+.search-wrap input:focus { border-color: var(--primary); }
+.search-icon { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); font-size: 15px; }
+.ctrl-select {
+  padding: 9px 12px; border: 1.5px solid var(--border); border-radius: var(--radius-sm);
+  font-size: 13px; font-family: inherit; background: var(--surface); outline: none; cursor: pointer;
+}
+.ctrl-btn {
+  padding: 9px 16px; border-radius: var(--radius-sm); font-size: 13px; font-weight: 600;
+  cursor: pointer; font-family: inherit; border: 1.5px solid var(--border);
+  background: var(--surface); color: var(--text); transition: all .18s;
+}
+.ctrl-btn.active, .ctrl-btn:hover { border-color: var(--primary); color: var(--primary); background: var(--blue-bg); }
+
+/* ── TABLE ──────────────────────────────────────────── */
+.table-wrap { background: var(--surface); border-radius: var(--radius); box-shadow: var(--shadow); border: 1px solid var(--border); overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th { padding: 12px 14px; text-align: left; font-size: 11.5px; font-weight: 600; color: var(--muted); border-bottom: 1px solid var(--border); white-space: nowrap; background: #FAFAFA; }
+td { padding: 12px 14px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+tr:last-child td { border-bottom: none; }
+tr:hover td { background: #FAFAFA; }
+.fn { font-weight: 500; max-width: 200px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mono { font-family: monospace; font-size: 11px; color: var(--muted); }
+
+/* badges same as student side */
+.badge { display:inline-flex; align-items:center; gap:4px; padding:3px 8px; border-radius:20px; font-size:11px; font-weight:600; }
+.badge-ready    { background:var(--green-bg); color:var(--green); }
+.badge-converting { background:var(--amber-bg); color:var(--amber); }
+.badge-na       { background:var(--blue-bg);  color:var(--blue);  }
+.badge-failed   { background:var(--red-bg);   color:var(--red);   }
+.badge-deleted  { background:#F1F5F9; color:var(--muted); }
+
+/* action buttons in table */
+.tbl-btn {
+  padding:5px 10px; border-radius:6px; font-size:11.5px; font-weight:600;
+  cursor:pointer; border:1px solid var(--border); background:var(--bg);
+  color:var(--text); font-family:inherit; transition:all .15s;
+}
+.tbl-btn:hover           { border-color:var(--primary); color:var(--primary); background:var(--blue-bg); }
+.tbl-btn.danger:hover    { border-color:var(--red);     color:var(--red);     background:var(--red-bg); }
+.tbl-btn.success:hover   { border-color:var(--green);   color:var(--green);   background:var(--green-bg); }
+
+/* ── SETTINGS SECTION ───────────────────────────────── */
+.settings-card {
+  background: var(--surface); border-radius: var(--radius);
+  box-shadow: var(--shadow); border: 1px solid var(--border);
+  padding: 24px; margin-top: 28px;
+}
+.settings-title { font-size: 15px; font-weight: 600; margin-bottom: 16px; }
+.settings-row   { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.settings-label { font-size: 13.5px; color: var(--muted); }
+.settings-input {
+  padding: 8px 12px; border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm); font-size: 13px; font-family: inherit; outline: none; width: 90px;
+}
+.save-btn {
+  padding: 8px 18px; background: var(--primary); color: #fff; border: none;
+  border-radius: var(--radius-sm); font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit;
+}
+
+/* ── EDIT MODAL ─────────────────────────────────────── */
+#edit-modal-overlay {
+  display:none; position:fixed; inset:0; z-index:500;
+  background:rgba(15,23,42,.6); backdrop-filter:blur(3px);
+  align-items:center; justify-content:center;
+}
+#edit-modal-overlay.open { display:flex; }
+#edit-modal {
+  background:var(--surface); border-radius:var(--radius); width:420px;
+  box-shadow:0 20px 60px rgba(0,0,0,.25); padding:28px;
+}
+.em-title { font-size:16px; font-weight:700; margin-bottom:20px; }
+.em-label { font-size:12px; font-weight:600; color:var(--muted); margin-bottom:5px; }
+.em-input {
+  width:100%; padding:9px 12px; border:1.5px solid var(--border);
+  border-radius:var(--radius-sm); font-size:13.5px; font-family:inherit; outline:none;
+  margin-bottom:14px;
+}
+.em-input:focus { border-color:var(--primary); }
+.em-footer { display:flex; gap:10px; justify-content:flex-end; margin-top:4px; }
+.em-cancel { background:var(--bg); border:1px solid var(--border); color:var(--muted); padding:8px 18px; border-radius:var(--radius-sm); font-size:13px; cursor:pointer; font-family:inherit; }
+.em-save   { background:var(--primary); color:#fff; border:none; padding:8px 18px; border-radius:var(--radius-sm); font-size:13px; font-weight:600; cursor:pointer; font-family:inherit; }
+
+/* ── TOAST ──────────────────────────────────────────── */
+#toast-container { position:fixed; bottom:20px; left:50%; transform:translateX(-50%); z-index:9999; display:flex; flex-direction:column; gap:8px; }
+.toast { padding:10px 20px; border-radius:9px; font-size:13px; font-weight:500; background:#1E293B; color:#fff; box-shadow:0 4px 16px rgba(0,0,0,.2); min-width:180px; text-align:center; animation:tIn .2s ease; }
+.toast.s { background:#064E3B; } .toast.e { background:#7F1D1D; }
+@keyframes tIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
+
+.section-header { font-size:15px; font-weight:600; margin-bottom:14px; display:flex; align-items:center; justify-content:space-between; }
+.count-lbl { font-size:13px; color:var(--muted); font-weight:400; }
+.no-results { text-align:center; padding:40px 20px; color:var(--muted); font-size:14px; }
+
+/* ── TABS ─────────────────────────────────── */
+.tabs { display:flex; gap:6px; margin-bottom:22px; border-bottom:1px solid var(--border); }
+.tab-btn {
+  padding:10px 18px; border:none; background:none; cursor:pointer; font-family:inherit;
+  font-size:14px; font-weight:600; color:var(--muted); border-bottom:2px solid transparent;
+  margin-bottom:-1px; transition:all .18s;
+}
+.tab-btn:hover { color:var(--text); }
+.tab-btn.active { color:var(--primary); border-bottom-color:var(--primary); }
+
+/* feedback status pill + message cell */
+.fb-msg { max-width:340px; white-space:normal; line-height:1.45; font-size:12.5px; color:var(--text); }
+.fb-type { display:inline-block; padding:2px 9px; border-radius:20px; font-size:11px; font-weight:600; background:var(--blue-bg); color:var(--blue); white-space:nowrap; }
+.fb-status-pending  { color:var(--amber); font-weight:600; font-size:12px; }
+.fb-status-resolved { color:var(--green); font-weight:600; font-size:12px; }
+</style>
+</head>
+<body>
+
+<!-- ── LOGIN ──────────────────────────────────────────── -->
+<div id="login-screen">
+  <div class="login-card">
+    <div class="login-icon">🔐</div>
+    <div class="login-title">Admin Panel</div>
+    <div class="login-sub">XIE Files · Restricted Access</div>
+    <div class="login-form">
+      <input class="login-input" type="password" id="pw" placeholder="Enter admin password" autocomplete="current-password"/>
+      <button class="login-btn" id="login-btn">Sign In</button>
+      <div id="login-error">Incorrect password. Try again.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ── APP ────────────────────────────────────────────── -->
+<div id="app">
+  <header>
+    <div class="header-logo">
+      XIE Files — Admin
+      <a href="/">← Student View</a>
+    </div>
+    <div class="header-right">
+      <button class="logout-btn" id="logout-btn">Sign Out</button>
+    </div>
+  </header>
+
+  <main>
+    <!-- STATS -->
+    <div class="stats-grid" id="stats-grid">
+      <div class="stat-card"><div class="stat-label">Active Files</div><div class="stat-value" id="s-active">—</div></div>
+      <div class="stat-card"><div class="stat-label">Total Uploaded</div><div class="stat-value" id="s-total">—</div></div>
+      <div class="stat-card"><div class="stat-label">Deleted</div><div class="stat-value" id="s-deleted">—</div></div>
+      <div class="stat-card"><div class="stat-label">Active Storage</div><div class="stat-value" id="s-active-bytes">—</div></div>
+      <div class="stat-card"><div class="stat-label">Total Storage</div><div class="stat-value" id="s-total-bytes">—</div></div>
+    </div>
+
+    <!-- TAB SWITCHER -->
+    <div class="tabs">
+      <button class="tab-btn active" id="tab-files"    onclick="switchTab('files')">📁 Files</button>
+      <button class="tab-btn"        id="tab-feedback" onclick="switchTab('feedback')">💬 Feedback</button>
+    </div>
+
+    <!-- ══════════ FILES SECTION ══════════ -->
+    <div id="files-section">
+    <!-- CONTROLS -->
+    <div class="controls">
+      <div class="search-wrap">
+        <span class="search-icon">🔍</span>
+        <input type="text" id="search-input" placeholder="Search by filename…"/>
+      </div>
+      <select class="ctrl-select" id="status-filter">
+        <option value="">All Statuses</option>
+        <option value="ready">PDF Ready</option>
+        <option value="converting">Converting</option>
+        <option value="failed">Failed</option>
+        <option value="na">Original Only</option>
+      </select>
+      <button class="ctrl-btn" id="show-active" onclick="setMode('active')">Active</button>
+      <button class="ctrl-btn" id="show-deleted" onclick="setMode('deleted')">Deleted</button>
+      <button class="ctrl-btn" onclick="loadFiles()">🔄 Refresh</button>
+    </div>
+
+    <!-- TABLE -->
+    <div class="section-header">
+      <span id="table-label">Active Files</span>
+      <span class="count-lbl" id="row-count"></span>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>File Name</th>
+            <th>Type</th>
+            <th>Size</th>
+            <th>Uploaded</th>
+            <th>Expires</th>
+            <th>PDF Status</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="file-table-body">
+          <tr><td colspan="7" class="no-results">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- SETTINGS -->
+    <div class="settings-card">
+      <div class="settings-title">⚙️ File Retention Policy</div>
+      <div class="settings-row">
+        <span class="settings-label">Default expiry for new uploads:</span>
+        <input class="settings-input" type="number" id="expiry-days-input" min="1" max="365" value="30"/>
+        <span class="settings-label">days</span>
+        <button class="save-btn" id="save-settings-btn">Save</button>
+      </div>
+      <div style="margin-top:10px;font-size:12px;color:var(--muted)">
+        Only affects files uploaded after this change. Existing files keep their original expiry.
+      </div>
+    </div>
+    </div><!-- /files-section -->
+
+    <!-- ══════════ FEEDBACK SECTION ══════════ -->
+    <div id="feedback-section" style="display:none">
+      <!-- Feedback stats -->
+      <div class="stats-grid">
+        <div class="stat-card"><div class="stat-label">Total</div><div class="stat-value" id="fb-total">—</div></div>
+        <div class="stat-card"><div class="stat-label">Pending</div><div class="stat-value" id="fb-pending">—</div></div>
+        <div class="stat-card"><div class="stat-label">Resolved</div><div class="stat-value" id="fb-resolved">—</div></div>
+      </div>
+
+      <div class="controls">
+        <div class="search-wrap">
+          <span class="search-icon">🔍</span>
+          <input type="text" id="fb-search" placeholder="Search name or message…"/>
+        </div>
+        <select class="ctrl-select" id="fb-filter">
+          <option value="">All Feedback</option>
+          <option value="0">Pending only</option>
+          <option value="1">Resolved only</option>
+        </select>
+        <button class="ctrl-btn" onclick="loadFeedback()">🔄 Refresh</button>
+        <button class="ctrl-btn" onclick="exportFeedback()">⬇ Export CSV</button>
+      </div>
+
+      <div class="section-header">
+        <span>Feedback</span>
+        <span class="count-lbl" id="fb-count"></span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Type</th>
+              <th>Message</th>
+              <th>Status</th>
+              <th>Submitted</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="fb-table-body">
+            <tr><td colspan="6" class="no-results">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div><!-- /feedback-section -->
+  </main>
+</div>
+
+<!-- ── EDIT MODAL ─────────────────────────────────────── -->
+<div id="edit-modal-overlay">
+  <div id="edit-modal">
+    <div class="em-title">✏️ Edit File Metadata</div>
+    <div class="em-label">File Name</div>
+    <input class="em-input" type="text" id="em-name" placeholder="Display name…"/>
+    <div class="em-label">Expiry Date & Time</div>
+    <input class="em-input" type="datetime-local" id="em-expiry"/>
+    <input type="hidden" id="em-file-id"/>
+    <div class="em-footer">
+      <button class="em-cancel" id="em-cancel">Cancel</button>
+      <button class="em-save"   id="em-save">Save Changes</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast-container"></div>
+
+<script>
+// ── UTILS ─────────────────────────────────────────────────────────
+const $ = id => document.getElementById(id);
+function toast(msg, type='') {
+  const t = document.createElement('div');
+  t.className = 'toast' + (type ? ' '+type : '');
+  t.textContent = msg;
+  $('toast-container').appendChild(t);
+  setTimeout(() => t.remove(), 3000);
+}
+function fmt(bytes) {
+  if (!bytes) return '0 B';
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1048576) return (bytes/1024).toFixed(1) + ' KB';
+  if (bytes < 1073741824) return (bytes/1048576).toFixed(1) + ' MB';
+  return (bytes/1073741824).toFixed(1) + ' GB';
+}
+function fmtDate(ts) {
+  if (!ts) return '—';
+  return new Date(ts).toLocaleString('en-IN', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' });
+}
+function badgeHtml(status) {
+  const map = {
+    ready:      `<span class="badge badge-ready">🟢 PDF Ready</span>`,
+    converting: `<span class="badge badge-converting">🟡 Converting</span>`,
+    na:         `<span class="badge badge-na">🔵 Original</span>`,
+    failed:     `<span class="badge badge-failed">🔴 Failed</span>`,
+  };
+  return map[status] || `<span class="badge badge-na">${status}</span>`;
+}
+function mimeShort(mime) {
+  const m = {
+    'application/pdf':'PDF','application/msword':'DOC',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document':'DOCX',
+    'application/vnd.ms-powerpoint':'PPT',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation':'PPTX',
+    'application/vnd.ms-excel':'XLS',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':'XLSX',
+    'text/plain':'TXT','image/jpeg':'JPG','image/jpg':'JPG',
+    'image/png':'PNG','image/gif':'GIF','image/webp':'WEBP',
+    'application/zip':'ZIP','application/x-zip-compressed':'ZIP',
+  };
+  if (mime.startsWith('image/')) return mime.split('/')[1].toUpperCase();
+  return m[mime] || mime.split('/').pop().toUpperCase().slice(0,6);
+}
+
+// ── STATE ─────────────────────────────────────────────────────────
+let mode = 'active'; // 'active' | 'deleted'
+
+// ── LOGIN ──────────────────────────────────────────────────────────
+async function checkSession() {
+  const r = await fetch('/api/admin/session');
+  const d = await r.json();
+  if (d.isAdmin) showApp();
+}
+checkSession();
+
+$('pw').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+$('login-btn').addEventListener('click', doLogin);
+
+async function doLogin() {
+  const pw = $('pw').value;
+  const r = await fetch('/api/admin/login', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ password: pw })
+  });
+  const d = await r.json();
+  if (d.success) { showApp(); }
+  else { $('login-error').style.display = 'block'; $('pw').value = ''; $('pw').focus(); }
+}
+
+function showApp() {
+  $('login-screen').style.display = 'none';
+  $('app').style.display = 'flex';
+  loadStats();
+  loadFiles();
+}
+
+$('logout-btn').addEventListener('click', async () => {
+  await fetch('/api/admin/logout', { method:'POST' });
+  location.reload();
+});
+
+// ── STATS ──────────────────────────────────────────────────────────
+async function loadStats() {
+  const r = await fetch('/api/admin/stats');
+  const d = await r.json();
+  const o = d.overview || {};
+  $('s-active').textContent        = o.active ?? '—';
+  $('s-total').textContent         = o.total  ?? '—';
+  $('s-deleted').textContent       = o.deleted ?? '—';
+  $('s-active-bytes').textContent  = fmt(o.active_bytes);
+  $('s-total-bytes').textContent   = fmt(o.total_bytes);
+}
+
+// ── FILES ──────────────────────────────────────────────────────────
+function setMode(m) {
+  mode = m;
+  $('show-active').classList.toggle('active', m === 'active');
+  $('show-deleted').classList.toggle('active', m === 'deleted');
+  $('table-label').textContent = m === 'active' ? 'Active Files' : 'Deleted Files';
+  loadFiles();
+}
+setMode('active');
+
+async function loadFiles() {
+  const search = $('search-input').value.trim();
+  const status = $('status-filter').value;
+  const params = new URLSearchParams({ search, status, deleted: mode === 'deleted' ? '1' : '0' });
+  const r = await fetch(`/api/admin/files?${params}`);
+  const files = await r.json();
+  renderTable(files);
+  $('row-count').textContent = `${files.length} file${files.length !== 1 ? 's' : ''}`;
+}
+
+let debounce;
+$('search-input').addEventListener('input', () => { clearTimeout(debounce); debounce = setTimeout(loadFiles, 300); });
+$('status-filter').addEventListener('change', loadFiles);
+
+function renderTable(files) {
+  const tbody = $('file-table-body');
+  if (!files.length) {
+    tbody.innerHTML = '<tr><td colspan="7" class="no-results">No files found</td></tr>';
+    return;
+  }
+  tbody.innerHTML = files.map(f => {
+    const isDeleted = !!f.deleted_at;
+    return `
+    <tr>
+      <td><div class="fn" title="${f.original_name}">${f.original_name}</div><div class="mono">${f.id.slice(0,12)}…</div></td>
+      <td>${mimeShort(f.mime_type)}</td>
+      <td>${fmt(f.size)}</td>
+      <td>${fmtDate(f.uploaded_at)}</td>
+      <td>${isDeleted ? `<span style="color:var(--red)">Deleted ${fmtDate(f.deleted_at)}</span>` : fmtDate(f.expires_at)}</td>
+      <td>${isDeleted ? '<span class="badge badge-deleted">Deleted</span>' : badgeHtml(f.pdf_status)}</td>
+      <td style="white-space:nowrap">
+        ${!isDeleted ? `
+          <button class="tbl-btn" onclick="openDownload('${f.id}')">⬇</button>
+          <button class="tbl-btn" onclick="openEdit('${f.id}','${f.original_name.replace(/'/g,"\\'")}',${f.expires_at})">✏️</button>
+          <button class="tbl-btn danger" onclick="adminDelete('${f.id}')">🗑</button>
+        ` : `
+          <button class="tbl-btn success" onclick="adminRestore('${f.id}')">♻️ Restore</button>
+        `}
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function openDownload(id) {
+  window.open(`/api/files/${id}/download`, '_blank');
+}
+
+async function adminDelete(id) {
+  if (!confirm('Delete this file? It will be soft-deleted and recoverable for 7 days.')) return;
+  const r = await fetch(`/api/admin/files/${id}`, { method:'DELETE' });
+  const d = await r.json();
+  if (d.success) { toast('🗑 Deleted', 's'); loadFiles(); loadStats(); }
+  else toast('❌ ' + d.error, 'e');
+}
+
+async function adminRestore(id) {
+  const r = await fetch(`/api/admin/files/${id}/restore`, { method:'PATCH' });
+  const d = await r.json();
+  if (d.success) { toast('✅ Restored', 's'); loadFiles(); loadStats(); }
+  else toast('❌ ' + d.error, 'e');
+}
+
+// ── EDIT MODAL ─────────────────────────────────────────────────────
+function openEdit(id, name, expiresAt) {
+  $('em-file-id').value = id;
+  $('em-name').value    = name;
+  // datetime-local needs format: YYYY-MM-DDTHH:MM
+  const dt = new Date(expiresAt);
+  const pad = n => String(n).padStart(2,'0');
+  $('em-expiry').value = `${dt.getFullYear()}-${pad(dt.getMonth()+1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
+  $('edit-modal-overlay').classList.add('open');
+  $('em-name').focus();
+}
+
+$('em-cancel').addEventListener('click', () => $('edit-modal-overlay').classList.remove('open'));
+$('edit-modal-overlay').addEventListener('click', e => { if (e.target === $('edit-modal-overlay')) $('em-cancel').click(); });
+
+$('em-save').addEventListener('click', async () => {
+  const id          = $('em-file-id').value;
+  const original_name = $('em-name').value.trim();
+  const expires_at  = $('em-expiry').value;
+  if (!original_name) { toast('Name cannot be empty', 'e'); return; }
+
+  const r = await fetch(`/api/admin/files/${id}`, {
+    method:'PATCH', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ original_name, expires_at })
+  });
+  const d = await r.json();
+  if (d.success) {
+    toast('✅ Updated', 's');
+    $('edit-modal-overlay').classList.remove('open');
+    loadFiles();
+  } else toast('❌ ' + d.error, 'e');
+});
+
+// ── SETTINGS ───────────────────────────────────────────────────────
+$('save-settings-btn').addEventListener('click', async () => {
+  const days = parseInt($('expiry-days-input').value);
+  if (!days || days < 1 || days > 365) { toast('Enter a value between 1 and 365', 'e'); return; }
+  const r = await fetch('/api/admin/settings', {
+    method:'PUT', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ expiry_days: days })
+  });
+  const d = await r.json();
+  if (d.success) toast(`✅ Expiry set to ${d.expiry_days} days`, 's');
+  else toast('❌ ' + d.error, 'e');
+});
+
+// ── TAB SWITCHING ──────────────────────────────────────────────────
+function switchTab(tab) {
+  const isFiles = tab === 'files';
+  $('files-section').style.display    = isFiles ? 'block' : 'none';
+  $('feedback-section').style.display = isFiles ? 'none'  : 'block';
+  $('tab-files').classList.toggle('active', isFiles);
+  $('tab-feedback').classList.toggle('active', !isFiles);
+  if (!isFiles) loadFeedback();
+}
+
+// ── FEEDBACK ───────────────────────────────────────────────────────
+let fbDebounce;
+$('fb-search').addEventListener('input', () => { clearTimeout(fbDebounce); fbDebounce = setTimeout(loadFeedback, 300); });
+$('fb-filter').addEventListener('change', loadFeedback);
+
+async function loadFeedback() {
+  const search   = $('fb-search').value.trim();
+  const resolved = $('fb-filter').value;
+  const params   = new URLSearchParams({ search });
+  if (resolved !== '') params.set('resolved', resolved);
+  const r = await fetch(`/api/admin/feedback?${params}`);
+  const d = await r.json();
+  const items = d.items || [];
+  const s = d.stats || {};
+  $('fb-total').textContent    = s.total ?? '—';
+  $('fb-pending').textContent  = s.pending ?? '—';
+  $('fb-resolved').textContent = s.resolved ?? '—';
+  $('fb-count').textContent    = `${items.length} item${items.length !== 1 ? 's' : ''}`;
+  renderFeedback(items);
+}
+
+function renderFeedback(items) {
+  const tbody = $('fb-table-body');
+  if (!items.length) { tbody.innerHTML = '<tr><td colspan="6" class="no-results">No feedback found</td></tr>'; return; }
+  tbody.innerHTML = items.map(f => `
+    <tr>
+      <td style="font-weight:500;white-space:nowrap">${escapeHtml(f.name)}</td>
+      <td><span class="fb-type">${escapeHtml(f.type)}</span></td>
+      <td class="fb-msg">${escapeHtml(f.message)}</td>
+      <td><span class="${f.resolved ? 'fb-status-resolved' : 'fb-status-pending'}">${f.resolved ? '✓ Resolved' : '● Pending'}</span></td>
+      <td style="white-space:nowrap">${fmtDate(f.created_at)}</td>
+      <td style="white-space:nowrap">
+        <button class="tbl-btn ${f.resolved ? '' : 'success'}" onclick="toggleResolved('${f.id}',${!f.resolved})">
+          ${f.resolved ? '↩ Reopen' : '✓ Resolve'}
+        </button>
+        <button class="tbl-btn danger" onclick="deleteFeedback('${f.id}')">🗑</button>
+      </td>
+    </tr>`).join('');
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+}
+
+async function toggleResolved(id, resolved) {
+  const r = await fetch(`/api/admin/feedback/${id}/resolve`, {
+    method:'PATCH', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ resolved })
+  });
+  const d = await r.json();
+  if (d.success) { toast(resolved ? '✅ Marked resolved' : '↩ Reopened', 's'); loadFeedback(); }
+  else toast('❌ ' + d.error, 'e');
+}
+
+async function deleteFeedback(id) {
+  if (!confirm('Delete this feedback permanently?')) return;
+  const r = await fetch(`/api/admin/feedback/${id}`, { method:'DELETE' });
+  const d = await r.json();
+  if (d.success) { toast('🗑 Deleted', 's'); loadFeedback(); }
+  else toast('❌ ' + d.error, 'e');
+}
+
+function exportFeedback() {
+  window.open('/api/admin/feedback/export', '_blank');
+}
+
+// ── KEYBOARD SHORTCUTS ─────────────────────────────────────────────
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    $('edit-modal-overlay').classList.remove('open');
+    $('em-cancel').click();
+  }
+});
+</script>
+</body>
+</html>
