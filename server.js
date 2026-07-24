@@ -6,6 +6,7 @@ const multer       = require('multer');
 const path         = require('path');
 const fs           = require('fs');
 const { v4: uuid } = require('uuid');
+const crypto       = require('crypto');
 const cron         = require('node-cron');
 const { exec }     = require('child_process');
 const session      = require('express-session');
@@ -91,9 +92,15 @@ function initialPdfStatus(mime) {
   return 'converting';
 }
 
+// Strip secrets (uploader_token + share_slug) before sending to clients
 function publicFile(f) {
-  const { uploader_token, ...pub } = f;
+  const { uploader_token, share_slug, ...pub } = f;
   return pub;
+}
+
+// Unguessable URL-safe token for private share links (~32 chars)
+function makeSlug() {
+  return crypto.randomBytes(24).toString('base64url');
 }
 
 // ─────────────────────────────────────────────
@@ -141,7 +148,7 @@ async function triggerConversion(fileId, storedName) {
 //  STUDENT API
 // ─────────────────────────────────────────────
 
-/** POST /api/upload */
+/** POST /api/upload  (body field: visibility = 'public' | 'private') */
 app.post('/api/upload', (req, res, next) => {
   upload.single('file')(req, res, (err) => {
     if (err) {
@@ -158,6 +165,10 @@ app.post('/api/upload', (req, res, next) => {
     const now           = Date.now();
     const pdfStatus     = initialPdfStatus(f.mimetype);
 
+    // Private uploads get a secret slug and stay OFF the public board.
+    const isPrivate = req.body.visibility === 'private';
+    const shareSlug = isPrivate ? makeSlug() : null;
+
     const record = {
       id:              uuid(),
       original_name:   f.originalname,
@@ -170,11 +181,22 @@ app.post('/api/upload', (req, res, next) => {
       pdf_status:      pdfStatus,
       pdf_stored_name: null,
       uploader_token:  uploaderToken,
+      visibility:      isPrivate ? 'private' : 'public',
+      share_slug:      shareSlug,
     };
 
     db.insert(record);
-    io.emit('file:added', publicFile(record));
-    res.json({ success: true, file: publicFile(record), uploaderToken });
+
+    // Only announce PUBLIC files to everyone. Private files must not leak.
+    if (!isPrivate) io.emit('file:added', publicFile(record));
+
+    res.json({
+      success: true,
+      file: publicFile(record),
+      uploaderToken,
+      visibility: record.visibility,
+      shareSlug,   // null for public; the secret for private
+    });
 
     if (pdfStatus === 'converting') triggerConversion(record.id, record.stored_name);
   } catch (err) {
@@ -183,13 +205,16 @@ app.post('/api/upload', (req, res, next) => {
   }
 });
 
-/** GET /api/files */
+/** GET /api/files — public board only */
 app.get('/api/files', (req, res) => res.json(db.activePublic()));
 
-/** GET /api/files/:id/download */
+/** GET /api/files/:id/download?slug=...  (public by id, private by slug) */
 app.get('/api/files/:id/download', (req, res) => {
-  const f = db.getActive(req.params.id);
+  let f = db.getActive(req.params.id);
+  if (f && f.visibility === 'private') f = null;           // private not reachable by id
+  if (!f && req.query.slug) f = db.getBySlug(req.query.slug);
   if (!f) return res.status(404).json({ error: 'File not found' });
+
   const fp = path.join(UPLOAD_DIR, f.stored_name);
   if (!fs.existsSync(fp)) return res.status(404).json({ error: 'File missing on disk' });
   res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(f.original_name)}`);
@@ -197,9 +222,11 @@ app.get('/api/files/:id/download', (req, res) => {
   res.sendFile(fp);
 });
 
-/** GET /api/files/:id/pdf?inline=1 */
+/** GET /api/files/:id/pdf?inline=1&slug=...  (public by id, private by slug) */
 app.get('/api/files/:id/pdf', (req, res) => {
-  const f = db.getActive(req.params.id);
+  let f = db.getActive(req.params.id);
+  if (f && f.visibility === 'private') f = null;
+  if (!f && req.query.slug) f = db.getBySlug(req.query.slug);
   if (!f) return res.status(404).json({ error: 'File not found' });
 
   let fp;
@@ -224,14 +251,22 @@ app.get('/api/files/:id/pdf', (req, res) => {
   res.sendFile(fp);
 });
 
-/** DELETE /api/files/:id */
+/** GET /api/share/:slug — metadata for a private shared file */
+app.get('/api/share/:slug', (req, res) => {
+  const f = db.getBySlug(req.params.slug);
+  if (!f) return res.status(404).json({ error: 'This link is invalid or has expired' });
+  const { uploader_token, ...pub } = f;   // keep share_slug so client can build URLs
+  res.json({ file: pub });
+});
+
+/** DELETE /api/files/:id  (owner token required) */
 app.delete('/api/files/:id', (req, res) => {
   const { token } = req.body;
   const f = db.getById(req.params.id);
   if (!f || f.deleted_at) return res.status(404).json({ error: 'File not found' });
   if (f.uploader_token !== token) return res.status(403).json({ error: 'Not authorized' });
   db.update(f.id, { deleted_at: Date.now() });
-  io.emit('file:removed', { id: f.id });
+  if (f.visibility !== 'private') io.emit('file:removed', { id: f.id });
   res.json({ success: true });
 });
 
@@ -276,7 +311,7 @@ app.patch('/api/admin/files/:id/restore', requireAdmin, (req, res) => {
   const f = db.getById(req.params.id);
   if (!f) return res.status(404).json({ error: 'File not found' });
   db.update(f.id, { deleted_at: null });
-  if (f.expires_at > Date.now()) io.emit('file:added', publicFile({ ...f, deleted_at: null }));
+  if (f.expires_at > Date.now() && f.visibility !== 'private') io.emit('file:added', publicFile({ ...f, deleted_at: null }));
   res.json({ success: true });
 });
 
@@ -317,7 +352,7 @@ app.post('/api/notes', (req, res) => {
   const rec = {
     id:         uuid(),
     title:      String(title).slice(0, 200),
-    content:    String(content).slice(0, 50_000),   // cap size
+    content:    String(content).slice(0, 50_000),
     color,
     created_at: now,
     updated_at: now,
