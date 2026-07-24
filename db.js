@@ -46,8 +46,19 @@ function getActive(id) {
 }
 
 /**
+ * Get one active file by its private share_slug (used for private links).
+ * Works regardless of visibility — the slug IS the access grant.
+ */
+function getBySlug(slug) {
+  if (!slug) return null;
+  const now = Date.now();
+  return _store.find(f => f.share_slug === slug && !f.deleted_at && f.expires_at > now) || null;
+}
+
+/**
  * List files matching filter criteria (returns shallow copies, no uploader_token)
  * opts: { deleted, search, status, limit }
+ * NOTE: admin uses this and is allowed to see BOTH public and private files.
  */
 function list(opts = {}) {
   const now   = Date.now();
@@ -66,13 +77,17 @@ function list(opts = {}) {
     .map(f => ({ ...f }));
 }
 
-/** List active (non-deleted, non-expired) files — public shape (no token) */
+/**
+ * List active PUBLIC files only — public shape (no token, no slug).
+ * Private files are intentionally excluded so they never appear on the
+ * shared board or in the socket broadcast.
+ */
 function activePublic() {
   const now = Date.now();
   return _store
-    .filter(f => !f.deleted_at && f.expires_at > now)
+    .filter(f => !f.deleted_at && f.expires_at > now && f.visibility !== 'private')
     .sort((a, b) => b.uploaded_at - a.uploaded_at)
-    .map(({ uploader_token, ...pub }) => pub);
+    .map(({ uploader_token, share_slug, ...pub }) => pub);
 }
 
 /** Update arbitrary fields on a record by id */
@@ -114,7 +129,7 @@ function stats() {
   };
 }
 
-module.exports = { insert, getById, getActive, list, activePublic, update, hardDelete, hardDeleteWhere, stats };
+module.exports = { insert, getById, getActive, getBySlug, list, activePublic, update, hardDelete, hardDeleteWhere, stats };
 
 // ════════════════════════════════════════════════════════════════
 //  NOTES + FEEDBACK collections (separate JSON files)
