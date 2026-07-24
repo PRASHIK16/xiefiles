@@ -18,6 +18,12 @@ export const api = {
   downloadUrl:   (id)          => `/api/files/${id}/download`,
   pdfUrl:        (id, inline)  => `/api/files/${id}/pdf${inline ? '?inline=1' : ''}`,
 
+  // Private sharing
+  getShared:     (slug)              => req(`/api/share/${slug}`),
+  shareDownloadUrl: (id, slug)       => `/api/files/${id}/download?slug=${encodeURIComponent(slug)}`,
+  sharePdfUrl:   (id, slug, inline)  => `/api/files/${id}/pdf?slug=${encodeURIComponent(slug)}${inline ? '&inline=1' : ''}`,
+  buildShareLink:(slug)              => `${window.location.origin}/f/${slug}`,
+
   // Notes
   listNotes:     ()            => req('/api/notes'),
   createNote:    (body)        => req('/api/notes', { method: 'POST', body }),
@@ -29,7 +35,7 @@ export const api = {
 }
 
 // ── Uploader-token store (localStorage) ──────────────────────────
-const TFILE = 'xie_file_tokens', TNOTE = 'xie_note_tokens'
+const TFILE = 'xie_file_tokens', TNOTE = 'xie_note_tokens', TPRIV = 'xie_private_links'
 const read  = k => { try { return JSON.parse(localStorage.getItem(k) || '{}') } catch { return {} } }
 const write = (k, v) => localStorage.setItem(k, JSON.stringify(v))
 
@@ -40,4 +46,23 @@ export const tokens = {
   noteGet:  id => read(TNOTE)[id] || null,
   noteSet:  (id, t) => { const s = read(TNOTE); s[id] = t; write(TNOTE, s) },
   noteDel:  id => { const s = read(TNOTE); delete s[id]; write(TNOTE, s) },
+}
+
+// ── Private links store (localStorage) ───────────────────────────
+// Keyed by slug. Value: { slug, id, name, size, mime, at }
+export const privateLinks = {
+  all() {
+    const obj = read(TPRIV)
+    return Object.values(obj).sort((a, b) => b.at - a.at)
+  },
+  add(entry) {
+    const s = read(TPRIV)
+    s[entry.slug] = entry
+    write(TPRIV, s)
+  },
+  remove(slug) {
+    const s = read(TPRIV)
+    delete s[slug]
+    write(TPRIV, s)
+  },
 }
