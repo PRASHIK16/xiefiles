@@ -34,12 +34,15 @@ const MIME = {
   'application/vnd.ms-excel': 'XLS',
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'XLSX',
   'text/plain': 'TXT',
+  'text/csv': 'CSV',
   'application/zip': 'ZIP', 'application/x-zip-compressed': 'ZIP',
-  'application/x-rar-compressed': 'RAR',
+  'application/x-rar-compressed': 'RAR', 'application/vnd.rar': 'RAR',
 }
 export function mimeLabel(m) {
   if (!m) return 'FILE'
   if (m.startsWith('image/')) return m.split('/')[1].toUpperCase()
+  if (m.startsWith('audio/')) return m.split('/')[1].toUpperCase()
+  if (m.startsWith('video/')) return m.split('/')[1].toUpperCase()
   return MIME[m] || m.split('/').pop().toUpperCase().slice(0, 5)
 }
 
@@ -49,7 +52,26 @@ export function fileCategory(m) {
   if (m?.includes('presentation') || m?.includes('powerpoint')) return 'ppt'
   if (m?.includes('sheet') || m?.includes('excel')) return 'xls'
   if (m?.startsWith('image/')) return 'image'
+  if (m === 'text/csv') return 'csv'
   if (m === 'text/plain') return 'txt'
+  if (m?.startsWith('audio/')) return 'audio'
+  if (m?.startsWith('video/')) return 'video'
   if (m?.includes('zip') || m?.includes('rar')) return 'zip'
   return 'file'
+}
+
+/**
+ * How can this file be previewed in the browser?
+ * Returns one of: 'pdf' | 'image' | 'text' | 'audio' | 'video' | 'none'
+ * 'none' → show a clean "Download to open" placeholder (no error).
+ */
+export function previewKind(f) {
+  const m = f?.mime_type || ''
+  // Server-converted office docs become previewable PDFs
+  if (m === 'application/pdf' || (f?.pdf_status === 'ready' && f?.pdf_stored_name)) return 'pdf'
+  if (m.startsWith('image/')) return 'image'
+  if (m === 'text/plain' || m === 'text/csv') return 'text'
+  if (m.startsWith('audio/')) return 'audio'
+  if (m.startsWith('video/')) return 'video'
+  return 'none'
 }

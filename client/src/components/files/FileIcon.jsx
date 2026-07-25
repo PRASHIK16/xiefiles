@@ -1,4 +1,5 @@
-import { FileText, FileImage, FileSpreadsheet, Presentation, FileArchive, FileType, File } from 'lucide-react'
+import { FileText, FileImage, FileSpreadsheet, Presentation, FileArchive, FileType,
+         FileAudio, FileVideo, FileSpreadsheet as FileCsv, File } from 'lucide-react'
 import { fileCategory } from '../../lib/format'
 
 const MAP = {
@@ -6,8 +7,11 @@ const MAP = {
   doc:   { Icon: FileType,        cls: 'bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400' },
   ppt:   { Icon: Presentation,    cls: 'bg-orange-100 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400' },
   xls:   { Icon: FileSpreadsheet, cls: 'bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400' },
+  csv:   { Icon: FileCsv,         cls: 'bg-teal-100 text-teal-600 dark:bg-teal-900/30 dark:text-teal-400' },
   image: { Icon: FileImage,       cls: 'bg-purple-100 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400' },
   txt:   { Icon: FileText,        cls: 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400' },
+  audio: { Icon: FileAudio,       cls: 'bg-pink-100 text-pink-600 dark:bg-pink-900/30 dark:text-pink-400' },
+  video: { Icon: FileVideo,       cls: 'bg-indigo-100 text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-400' },
   zip:   { Icon: FileArchive,     cls: 'bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400' },
   file:  { Icon: File,            cls: 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400' },
 }

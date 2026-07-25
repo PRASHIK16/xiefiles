@@ -1,27 +1,17 @@
 import { useEffect, useRef } from 'react'
-import { X } from 'lucide-react'
+import { X, Eye } from 'lucide-react'
+import { previewKind } from '../../lib/format'
 
-// ── Print-ready badge ─────────────────────────────────────────────
-export function PrintBadge({ status, mime }) {
-  const isImage = mime?.startsWith('image/')
-  const isPdf   = mime === 'application/pdf'
-
-  let cfg
-  if (isPdf || (status === 'ready' && !isImage))
-    cfg = { dot: 'bg-brand-500', cls: 'bg-brand-50 text-brand-700 dark:bg-brand-900/30 dark:text-brand-300', label: 'PDF Ready' }
-  else if (isImage && (status === 'ready' || status === 'na'))
-    cfg = { dot: 'bg-brand-500', cls: 'bg-brand-50 text-brand-700 dark:bg-brand-900/30 dark:text-brand-300', label: 'Print Ready' }
-  else if (status === 'converting')
-    cfg = { dot: 'bg-amber-500 animate-pulseDot', cls: 'bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300', label: 'Converting…' }
-  else if (status === 'failed')
-    cfg = { dot: 'bg-red-500', cls: 'bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300', label: 'Conversion Failed' }
-  else
-    cfg = { dot: 'bg-blue-500', cls: 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300', label: 'Original Only' }
-
+// ── Preview tag ───────────────────────────────────────────────────
+// Only shows a small positive hint when a file can be previewed.
+// Never shows errors, "converting", or "failed" — clean by design.
+export function PreviewTag({ file }) {
+  const kind = previewKind(file)
+  if (kind === 'none') return null
   return (
-    <span className={`chip ${cfg.cls}`}>
-      <span className={`w-1.5 h-1.5 rounded-full ${cfg.dot}`} />
-      {cfg.label}
+    <span className="chip bg-brand-50 text-brand-700 dark:bg-brand-900/30 dark:text-brand-300">
+      <Eye size={11} />
+      Previewable
     </span>
   )
 }

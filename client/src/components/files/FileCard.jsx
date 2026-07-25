@@ -1,24 +1,20 @@
 import { useState, useEffect } from 'react'
 import { Eye, Download, Printer, Trash2, Clock } from 'lucide-react'
 import FileIcon from './FileIcon'
-import { PrintBadge } from '../ui'
-import { bytes, timeAgo, timeLeft } from '../../lib/format'
+import { PreviewTag } from '../ui'
+import { bytes, timeAgo, timeLeft, previewKind } from '../../lib/format'
 import { api, tokens } from '../../lib/api'
 import { useToast } from '../../context/ToastContext'
 import { useFiles } from '../../context/FilesContext'
-
-function canPreview(f) {
-  return f.mime_type === 'application/pdf'
-    || f.mime_type?.startsWith('image/')
-    || (f.pdf_status === 'ready' && f.pdf_stored_name)
-}
 
 export default function FileCard({ file, onPreview }) {
   const toast = useToast()
   const { removeLocal } = useFiles()
   const [left, setLeft] = useState(timeLeft(file.expires_at))
   const mine = !!tokens.fileGet(file.id)
-  const ready = canPreview(file)
+
+  const kind     = previewKind(file)
+  const canPrint = kind === 'pdf' || kind === 'image'   // only these truly print in-browser
 
   useEffect(() => {
     const t = setInterval(() => setLeft(timeLeft(file.expires_at)), 60000)
@@ -28,7 +24,11 @@ export default function FileCard({ file, onPreview }) {
   const download = () => { window.location.href = api.downloadUrl(file.id) }
 
   const print = () => {
-    if (!ready) return toast.info('Print version not ready yet')
+    // Not printable in-browser → guide the user cleanly, no error styling.
+    if (!canPrint) {
+      toast.info('Download this file to print it')
+      return
+    }
     const url = api.pdfUrl(file.id, true)
     let frame = document.getElementById('xie-print-frame')
     if (!frame) {
@@ -63,7 +63,7 @@ export default function FileCard({ file, onPreview }) {
           <p className="text-sm font-semibold truncate" title={file.original_name}>{file.original_name}</p>
           <p className="text-xs text-slate-400 mt-0.5">{bytes(file.size)} · {timeAgo(file.uploaded_at)}</p>
         </div>
-        <PrintBadge status={file.pdf_status} mime={file.mime_type} />
+        <PreviewTag file={file} />
       </div>
 
       <div className="flex items-center gap-1.5 text-xs text-slate-400">
@@ -74,15 +74,15 @@ export default function FileCard({ file, onPreview }) {
       </div>
 
       <div className="flex flex-wrap gap-1.5">
-        <button onClick={() => onPreview(file)} disabled={!ready}
-          className="btn btn-primary text-xs px-3 py-1.5 disabled:opacity-40 disabled:shadow-none disabled:cursor-not-allowed">
+        {/* Preview always available — modal shows content or a clean "download to open" */}
+        <button onClick={() => onPreview(file)} className="btn btn-primary text-xs px-3 py-1.5">
           <Eye size={14} /> Preview
         </button>
         <button onClick={download} className="btn btn-ghost text-xs px-3 py-1.5">
           <Download size={14} /> Download
         </button>
-        <button onClick={print} disabled={!ready}
-          className="btn btn-ghost text-xs px-3 py-1.5 disabled:opacity-40 disabled:cursor-not-allowed">
+        {/* Print always visible — printable files open the dialog, others get a clean hint */}
+        <button onClick={print} className="btn btn-ghost text-xs px-3 py-1.5">
           <Printer size={14} /> Print
         </button>
         {mine && (
