@@ -2,6 +2,7 @@ import { Routes, Route } from 'react-router-dom'
 import { FilesProvider } from './context/FilesContext'
 import Layout from './components/layout/Layout'
 import Home from './pages/Home'
+import MergePdf from './pages/MergePdf'
 import Notes from './pages/Notes'
 import Feedback from './pages/Feedback'
 import Share from './pages/Share'
@@ -16,6 +17,7 @@ export default function App() {
 
         <Route element={<Layout />}>
           <Route path="/"         element={<Home />} />
+          <Route path="/merge"    element={<MergePdf />} />
           <Route path="/notes"    element={<Notes />} />
           <Route path="/feedback" element={<Feedback />} />
           <Route path="/recent"   element={<Recent />} />

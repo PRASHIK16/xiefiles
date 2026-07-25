@@ -1,4 +1,5 @@
 require('dotenv').config();
+const { PDFDocument } = require('pdf-lib');
 const express      = require('express');
 const http         = require('http');
 const { Server }   = require('socket.io');
@@ -265,6 +266,57 @@ app.delete('/api/files/:id', (req, res) => {
   db.update(f.id, { deleted_at: Date.now() });
   if (f.visibility !== 'private') io.emit('file:removed', { id: f.id });
   res.json({ success: true });
+});
+
+// ─────────────────────────────────────────────
+//  MERGE PDF  — combine multiple PDFs into one (download only, nothing stored)
+// ─────────────────────────────────────────────
+const mergeUpload = multer({
+  storage: multer.memoryStorage(),              // keep in RAM, never touch disk/board
+  limits: { fileSize: 50 * 1024 * 1024, files: 20 },
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype === 'application/pdf') return cb(null, true);
+    cb(Object.assign(new Error('Only PDF files can be merged'), { code: 'INVALID_TYPE' }));
+  },
+});
+
+app.post('/api/merge-pdf', (req, res, next) => {
+  mergeUpload.array('files', 20)(req, res, (err) => {
+    if (err) {
+      const code = err.code === 'INVALID_TYPE' ? 415 : err.code === 'LIMIT_FILE_SIZE' ? 413 : 400;
+      return res.status(code).json({ error: err.message });
+    }
+    next();
+  });
+}, async (req, res) => {
+  try {
+    const files = req.files || [];
+    if (files.length < 2) return res.status(400).json({ error: 'Upload at least 2 PDFs to merge' });
+
+    // Order comes from the client as a comma-separated list of original indexes
+    let order = files.map((_, i) => i);
+    if (req.body.order) {
+      const parsed = String(req.body.order).split(',').map(n => parseInt(n, 10));
+      if (parsed.length === files.length && parsed.every(n => n >= 0 && n < files.length)) {
+        order = parsed;
+      }
+    }
+
+    const merged = await PDFDocument.create();
+    for (const idx of order) {
+      const src = await PDFDocument.load(files[idx].buffer);
+      const pages = await merged.copyPages(src, src.getPageIndices());
+      pages.forEach(p => merged.addPage(p));
+    }
+
+    const bytes = await merged.save();
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename="merged.pdf"');
+    res.send(Buffer.from(bytes));
+  } catch (err) {
+    console.error('Merge failed:', err.message);
+    res.status(500).json({ error: 'Could not merge PDFs. Make sure all files are valid PDFs.' });
+  }
 });
 
 // ─────────────────────────────────────────────

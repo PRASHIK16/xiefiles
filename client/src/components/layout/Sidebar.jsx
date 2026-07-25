@@ -1,8 +1,9 @@
 import { NavLink } from 'react-router-dom'
-import { Home, StickyNote, MessageSquarePlus, Clock, Info, HelpCircle, Settings, Shield } from 'lucide-react'
+import { Home, Combine, StickyNote, MessageSquarePlus, Clock, Info, HelpCircle, Settings, Shield } from 'lucide-react'
 
 const NAV = [
   { to: '/',         icon: Home,               label: 'Home' },
+  { to: '/merge',    icon: Combine,            label: 'Merge PDF' },
   { to: '/notes',    icon: StickyNote,         label: 'Notes' },
   { to: '/feedback', icon: MessageSquarePlus,  label: 'Feedback' },
   { to: '/recent',   icon: Clock,              label: 'Recent Uploads' },
