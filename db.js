@@ -1,7 +1,6 @@
 /**
  * db.js — Lightweight JSON file store
- * Mimics the SQLite API shape used in server.js
- * Persists to data/xiefiles.json; rebuilds on crash/restart automatically.
+ * Persists to data/*.json; rebuilds on crash/restart automatically.
  */
 const fs   = require('fs');
 const path = require('path');
@@ -45,10 +44,7 @@ function getActive(id) {
   return _store.find(f => f.id === id && !f.deleted_at && f.expires_at > now) || null;
 }
 
-/**
- * Get one active file by its private share_slug (used for private links).
- * Works regardless of visibility — the slug IS the access grant.
- */
+/** Get one active file by its private share_slug (used for private links) */
 function getBySlug(slug) {
   if (!slug) return null;
   const now = Date.now();
@@ -58,7 +54,7 @@ function getBySlug(slug) {
 /**
  * List files matching filter criteria (returns shallow copies, no uploader_token)
  * opts: { deleted, search, status, limit }
- * NOTE: admin uses this and is allowed to see BOTH public and private files.
+ * Admin uses this and is allowed to see BOTH public and private files.
  */
 function list(opts = {}) {
   const now   = Date.now();
@@ -79,8 +75,7 @@ function list(opts = {}) {
 
 /**
  * List active PUBLIC files only — public shape (no token, no slug).
- * Private files are intentionally excluded so they never appear on the
- * shared board or in the socket broadcast.
+ * Private files are intentionally excluded so they never appear on the board.
  */
 function activePublic() {
   const now = Date.now();
@@ -202,6 +197,13 @@ const feedback = {
       pending:  _feedback.filter(f => !f.resolved).length,
       byType:   _feedback.reduce((acc, f) => { acc[f.type] = (acc[f.type]||0)+1; return acc; }, {}),
     };
+  },
+  // Public list of featured feedback (safe fields only) — shown on homepage
+  featured() {
+    return _feedback
+      .filter(f => f.featured)
+      .sort((a, b) => b.created_at - a.created_at)
+      .map(f => ({ id: f.id, name: f.name, type: f.type, message: f.message, created_at: f.created_at }));
   },
 };
 

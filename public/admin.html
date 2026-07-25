@@ -626,6 +626,9 @@ function renderFeedback(items) {
         <button class="tbl-btn ${f.resolved ? '' : 'success'}" onclick="toggleResolved('${f.id}',${!f.resolved})">
           ${f.resolved ? '↩ Reopen' : '✓ Resolve'}
         </button>
+        <button class="tbl-btn ${f.featured ? 'active' : ''}" onclick="toggleFeatured('${f.id}',${!f.featured})">
+          ${f.featured ? '★ Featured' : '☆ Feature'}
+        </button>
         <button class="tbl-btn danger" onclick="deleteFeedback('${f.id}')">🗑</button>
       </td>
     </tr>`).join('');
@@ -650,6 +653,16 @@ async function deleteFeedback(id) {
   const r = await fetch(`/api/admin/feedback/${id}`, { method:'DELETE' });
   const d = await r.json();
   if (d.success) { toast('🗑 Deleted', 's'); loadFeedback(); }
+  else toast('❌ ' + d.error, 'e');
+}
+
+async function toggleFeatured(id, featured) {
+  const r = await fetch(`/api/admin/feedback/${id}/feature`, {
+    method:'PATCH', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ featured })
+  });
+  const d = await r.json();
+  if (d.success) { toast(featured ? '★ Added to homepage' : '☆ Removed from homepage', 's'); loadFeedback(); }
   else toast('❌ ' + d.error, 'e');
 }
 

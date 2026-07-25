@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react'
-import { Search, SlidersHorizontal, Lock, Copy, Check, ExternalLink, Trash2 } from 'lucide-react'
+import { Search, SlidersHorizontal, Lock, Copy, Check, ExternalLink, Trash2, Quote } from 'lucide-react'
 import UploadZone from '../components/files/UploadZone'
 import FileCard from '../components/files/FileCard'
 import PreviewModal from '../components/files/PreviewModal'
@@ -17,6 +17,48 @@ const FILTERS = [
   { key: 'ready', label: 'Print Ready' },
 ]
 
+// ── Featured feedback ("What students say") ────────────────────────
+function FeaturedFeedback() {
+  const [items, setItems] = useState([])
+
+  useEffect(() => {
+    let alive = true
+    fetch('/api/feedback/featured')
+      .then(r => r.json())
+      .then(d => { if (alive) setItems(d.items || []) })
+      .catch(() => {})
+    return () => { alive = false }
+  }, [])
+
+  if (items.length === 0) return null
+
+  return (
+    <div className="mt-8">
+      <div className="flex items-center gap-2 mb-3">
+        <Quote size={15} className="text-brand-500" />
+        <h2 className="font-display text-sm font-bold uppercase tracking-wider text-slate-500">What students say</h2>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        {items.map(f => (
+          <div key={f.id} className="card p-4 flex flex-col gap-2 animate-fadeUp">
+            <Quote size={18} className="text-brand-400/60" />
+            <p className="text-sm text-slate-700 dark:text-slate-200 leading-relaxed">{f.message}</p>
+            <div className="flex items-center gap-2 mt-1">
+              <div className="w-6 h-6 rounded-full bg-gradient-to-br from-brand-400 to-brand-600 flex items-center justify-center text-white text-[10px] font-bold shrink-0">
+                {(f.name && f.name !== 'Anonymous' ? f.name : '★').charAt(0).toUpperCase()}
+              </div>
+              <span className="text-xs font-medium text-slate-500">
+                {f.name && f.name !== 'Anonymous' ? f.name : 'A student'}
+                <span className="text-slate-400 font-normal"> · {f.type}</span>
+              </span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 // ── My Private Links (localStorage-backed) ─────────────────────────
 function PrivateLinks() {
   const toast = useToast()
@@ -25,8 +67,6 @@ function PrivateLinks() {
 
   const refresh = () => setItems(privateLinks.all())
   useEffect(() => { refresh() }, [])
-
-  // Refresh when returning to the tab (e.g. after a new private upload)
   useEffect(() => {
     const onFocus = () => refresh()
     window.addEventListener('focus', onFocus)
@@ -110,6 +150,9 @@ export default function Home() {
       </div>
 
       <UploadZone />
+
+      {/* What students say */}
+      <FeaturedFeedback />
 
       {/* Search + filters */}
       <div className="flex flex-col sm:flex-row gap-2.5 mt-6 mb-4">

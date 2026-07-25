@@ -33,9 +33,8 @@ const app        = express();
 const httpServer = http.createServer(app);
 const io         = new Server(httpServer, { cors: { origin: '*' } });
 
-app.use(express.json({ limit: '12mb' }));            // notes may embed base64 images
+app.use(express.json({ limit: '12mb' }));
 app.use(express.urlencoded({ extended: true, limit: '12mb' }));
-// Serve the built React app (client/dist). Falls back to legacy public/ for admin.html.
 const CLIENT_DIST = path.join(__dirname, 'client', 'dist');
 if (fs.existsSync(CLIENT_DIST)) app.use(express.static(CLIENT_DIST));
 app.use(express.static(path.join(__dirname, 'public')));
@@ -145,7 +144,7 @@ async function triggerConversion(fileId, storedName) {
 }
 
 // ─────────────────────────────────────────────
-//  STUDENT API
+//  STUDENT API — FILES
 // ─────────────────────────────────────────────
 
 /** POST /api/upload  (body field: visibility = 'public' | 'private') */
@@ -165,7 +164,6 @@ app.post('/api/upload', (req, res, next) => {
     const now           = Date.now();
     const pdfStatus     = initialPdfStatus(f.mimetype);
 
-    // Private uploads get a secret slug and stay OFF the public board.
     const isPrivate = req.body.visibility === 'private';
     const shareSlug = isPrivate ? makeSlug() : null;
 
@@ -187,7 +185,6 @@ app.post('/api/upload', (req, res, next) => {
 
     db.insert(record);
 
-    // Only announce PUBLIC files to everyone. Private files must not leak.
     if (!isPrivate) io.emit('file:added', publicFile(record));
 
     res.json({
@@ -195,7 +192,7 @@ app.post('/api/upload', (req, res, next) => {
       file: publicFile(record),
       uploaderToken,
       visibility: record.visibility,
-      shareSlug,   // null for public; the secret for private
+      shareSlug,
     });
 
     if (pdfStatus === 'converting') triggerConversion(record.id, record.stored_name);
@@ -208,10 +205,10 @@ app.post('/api/upload', (req, res, next) => {
 /** GET /api/files — public board only */
 app.get('/api/files', (req, res) => res.json(db.activePublic()));
 
-/** GET /api/files/:id/download?slug=...  (public by id, private by slug) */
+/** GET /api/files/:id/download?slug=... */
 app.get('/api/files/:id/download', (req, res) => {
   let f = db.getActive(req.params.id);
-  if (f && f.visibility === 'private') f = null;           // private not reachable by id
+  if (f && f.visibility === 'private') f = null;
   if (!f && req.query.slug) f = db.getBySlug(req.query.slug);
   if (!f) return res.status(404).json({ error: 'File not found' });
 
@@ -222,7 +219,7 @@ app.get('/api/files/:id/download', (req, res) => {
   res.sendFile(fp);
 });
 
-/** GET /api/files/:id/pdf?inline=1&slug=...  (public by id, private by slug) */
+/** GET /api/files/:id/pdf?inline=1&slug=... */
 app.get('/api/files/:id/pdf', (req, res) => {
   let f = db.getActive(req.params.id);
   if (f && f.visibility === 'private') f = null;
@@ -255,7 +252,7 @@ app.get('/api/files/:id/pdf', (req, res) => {
 app.get('/api/share/:slug', (req, res) => {
   const f = db.getBySlug(req.params.slug);
   if (!f) return res.status(404).json({ error: 'This link is invalid or has expired' });
-  const { uploader_token, ...pub } = f;   // keep share_slug so client can build URLs
+  const { uploader_token, ...pub } = f;
   res.json({ file: pub });
 });
 
@@ -338,13 +335,11 @@ app.put('/api/admin/settings', requireAdmin, (req, res) => {
 });
 
 // ═════════════════════════════════════════════
-//  NOTES API  (live collaborative notice board)
+//  NOTES API
 // ═════════════════════════════════════════════
 
-/** GET /api/notes */
 app.get('/api/notes', (req, res) => res.json(db.notes.list()));
 
-/** POST /api/notes  { title, content(HTML), color } */
 app.post('/api/notes', (req, res) => {
   const { title = '', content = '', color = 'default' } = req.body;
   if (!content.trim() && !title.trim()) return res.status(400).json({ error: 'Note is empty' });
@@ -363,7 +358,6 @@ app.post('/api/notes', (req, res) => {
   res.json({ success: true, note: db.notes.publicOf(rec), ownerToken: rec.owner_token });
 });
 
-/** PATCH /api/notes/:id  (owner token required) */
 app.patch('/api/notes/:id', (req, res) => {
   const n = db.notes.getById(req.params.id);
   if (!n) return res.status(404).json({ error: 'Note not found' });
@@ -377,7 +371,6 @@ app.patch('/api/notes/:id', (req, res) => {
   res.json({ success: true });
 });
 
-/** DELETE /api/notes/:id  (owner token required) */
 app.delete('/api/notes/:id', (req, res) => {
   const n = db.notes.getById(req.params.id);
   if (!n) return res.status(404).json({ error: 'Note not found' });
@@ -401,10 +394,16 @@ app.post('/api/feedback', (req, res) => {
     type:       String(type).slice(0, 40),
     message:    String(message).slice(0, 5000),
     resolved:   false,
+    featured:   false,
     created_at: Date.now(),
   };
   db.feedback.insert(rec);
   res.json({ success: true });
+});
+
+/** GET /api/feedback/featured — public list for the homepage */
+app.get('/api/feedback/featured', (req, res) => {
+  res.json({ items: db.feedback.featured() });
 });
 
 /** GET /api/admin/feedback — admin only */
@@ -422,6 +421,12 @@ app.patch('/api/admin/feedback/:id/resolve', requireAdmin, (req, res) => {
   ok ? res.json({ success: true }) : res.status(404).json({ error: 'Not found' });
 });
 
+/** PATCH /api/admin/feedback/:id/feature — toggle featured */
+app.patch('/api/admin/feedback/:id/feature', requireAdmin, (req, res) => {
+  const ok = db.feedback.update(req.params.id, { featured: !!req.body.featured });
+  ok ? res.json({ success: true }) : res.status(404).json({ error: 'Not found' });
+});
+
 /** DELETE /api/admin/feedback/:id */
 app.delete('/api/admin/feedback/:id', requireAdmin, (req, res) => {
   db.feedback.remove(req.params.id);
@@ -432,10 +437,11 @@ app.delete('/api/admin/feedback/:id', requireAdmin, (req, res) => {
 app.get('/api/admin/feedback/export', requireAdmin, (req, res) => {
   const rows = db.feedback.list();
   const esc = s => `"${String(s).replace(/"/g, '""')}"`;
-  const csv = ['Name,Type,Message,Status,Submitted']
+  const csv = ['Name,Type,Message,Status,Featured,Submitted']
     .concat(rows.map(r => [
       esc(r.name), esc(r.type), esc(r.message),
       r.resolved ? 'Resolved' : 'Pending',
+      r.featured ? 'Yes' : 'No',
       esc(new Date(r.created_at).toLocaleString('en-IN')),
     ].join(','))).join('\n');
   res.setHeader('Content-Type', 'text/csv');
@@ -462,7 +468,6 @@ io.on('connection', (socket) => {
 // ─────────────────────────────────────────────
 //  CRON JOBS
 // ─────────────────────────────────────────────
-// Every hour: soft-delete expired files
 cron.schedule('0 * * * *', () => {
   const now = Date.now();
   const all = db.list({ deleted: false });
@@ -472,7 +477,6 @@ cron.schedule('0 * * * *', () => {
   });
 });
 
-// Every night at 3 AM: permanently purge files soft-deleted > PERM_DEL_DAYS ago
 cron.schedule('0 3 * * *', () => {
   const cutoff = Date.now() - PERM_DEL_DAYS * 86_400_000;
   const old = db.hardDeleteWhere(f => f.deleted_at && f.deleted_at <= cutoff);
@@ -488,7 +492,7 @@ cron.schedule('0 3 * * *', () => {
 });
 
 // ─────────────────────────────────────────────
-//  SPA FALLBACK — serve React index.html for client-side routes
+//  SPA FALLBACK
 // ─────────────────────────────────────────────
 app.get(/^(?!\/api).*/, (req, res, next) => {
   const indexFile = path.join(CLIENT_DIST, 'index.html');
