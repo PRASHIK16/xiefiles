@@ -1,5 +1,4 @@
 require('dotenv').config();
-const { PDFDocument } = require('pdf-lib');
 const express      = require('express');
 const http         = require('http');
 const { Server }   = require('socket.io');
@@ -11,6 +10,7 @@ const crypto       = require('crypto');
 const cron         = require('node-cron');
 const { exec }     = require('child_process');
 const session      = require('express-session');
+const { PDFDocument } = require('pdf-lib');
 const db           = require('./db');
 
 // ─────────────────────────────────────────────
@@ -22,6 +22,8 @@ const SESSION_SEC   = process.env.SESSION_SECRET  || 'xie-secret-dev';
 const MAX_MB        = parseInt(process.env.MAX_FILE_SIZE_MB || '100');
 const EXPIRY_DAYS   = () => parseInt(process.env.EXPIRY_DAYS || '30');
 const PERM_DEL_DAYS = parseInt(process.env.PERMANENT_DELETE_AFTER_DAYS || '7');
+const OTP_TTL_MS    = 24 * 60 * 60 * 1000;      // OTP valid for 24 hours
+const DRAFT_TTL_MS  = 60 * 60 * 1000;           // unshared drafts auto-delete after 1 hour
 
 const UPLOAD_DIR    = path.join(__dirname, 'uploads');
 const CONVERTED_DIR = path.join(__dirname, 'converted');
@@ -30,7 +32,9 @@ const CONVERTED_DIR = path.join(__dirname, 'converted');
 // ─────────────────────────────────────────────
 //  EXPRESS + SOCKET.IO
 // ─────────────────────────────────────────────
+// ─────────────────────────────────────────────
 const app        = express();
+app.set('trust proxy', 1);
 const httpServer = http.createServer(app);
 const io         = new Server(httpServer, { cors: { origin: '*' } });
 
@@ -61,7 +65,7 @@ const ALLOWED_MIME = new Set([
 ]);
 
 // ─────────────────────────────────────────────
-//  MULTER (multer v2 API)
+//  MULTER
 // ─────────────────────────────────────────────
 const storage = multer.diskStorage({
   destination: UPLOAD_DIR,
@@ -92,15 +96,23 @@ function initialPdfStatus(mime) {
   return 'converting';
 }
 
-// Strip secrets (uploader_token + share_slug) before sending to clients
+// Strip secrets before sending to clients
 function publicFile(f) {
-  const { uploader_token, share_slug, ...pub } = f;
+  const { uploader_token, share_slug, otp_code, owner_batch, ...pub } = f;
   return pub;
 }
 
-// Unguessable URL-safe token for private share links (~32 chars)
-function makeSlug() {
-  return crypto.randomBytes(24).toString('base64url');
+// Generate a unique 4-digit OTP not currently in active use
+function makeOtp() {
+  const now = Date.now();
+  for (let attempt = 0; attempt < 50; attempt++) {
+    const code = String(Math.floor(1000 + Math.random() * 9000)); // 1000–9999
+    const inUse = db.getByOtp(code).length > 0
+      || db.list({ deleted: false }).some(f => f.otp_code === code && f.otp_expires_at > now && !f.is_draft);
+    if (!inUse) return code;
+  }
+  // Fallback (extremely unlikely): timestamp-based
+  return String(1000 + (now % 9000));
 }
 
 // ─────────────────────────────────────────────
@@ -148,7 +160,11 @@ async function triggerConversion(fileId, storedName) {
 //  STUDENT API — FILES
 // ─────────────────────────────────────────────
 
-/** POST /api/upload  (body field: visibility = 'public' | 'private') */
+/**
+ * POST /api/upload
+ * body.visibility = 'public'  → shows on board (default)
+ * body.visibility = 'otp'     → uploads as DRAFT (hidden). owner_batch groups the drafts.
+ */
 app.post('/api/upload', (req, res, next) => {
   upload.single('file')(req, res, (err) => {
     if (err) {
@@ -165,8 +181,9 @@ app.post('/api/upload', (req, res, next) => {
     const now           = Date.now();
     const pdfStatus     = initialPdfStatus(f.mimetype);
 
-    const isPrivate = req.body.visibility === 'private';
-    const shareSlug = isPrivate ? makeSlug() : null;
+    const isOtp = req.body.visibility === 'otp';
+    // For OTP drafts, the client sends a batch id so all files in one "share" group together.
+    const ownerBatch = isOtp ? (req.body.batch || uuid()) : null;
 
     const record = {
       id:              uuid(),
@@ -180,20 +197,26 @@ app.post('/api/upload', (req, res, next) => {
       pdf_status:      pdfStatus,
       pdf_stored_name: null,
       uploader_token:  uploaderToken,
-      visibility:      isPrivate ? 'private' : 'public',
-      share_slug:      shareSlug,
+      visibility:      isOtp ? 'otp' : 'public',
+      share_slug:      null,
+      // OTP fields
+      is_draft:        isOtp,        // draft until "Share" is pressed
+      owner_batch:     ownerBatch,
+      otp_code:        null,
+      otp_expires_at:  null,
     };
 
     db.insert(record);
 
-    if (!isPrivate) io.emit('file:added', publicFile(record));
+    // Only PUBLIC files hit the board / broadcast. OTP drafts stay hidden.
+    if (!isOtp) io.emit('file:added', publicFile(record));
 
     res.json({
       success: true,
       file: publicFile(record),
       uploaderToken,
       visibility: record.visibility,
-      shareSlug,
+      batch: ownerBatch,            // client keeps this to share the whole batch later
     });
 
     if (pdfStatus === 'converting') triggerConversion(record.id, record.stored_name);
@@ -206,11 +229,15 @@ app.post('/api/upload', (req, res, next) => {
 /** GET /api/files — public board only */
 app.get('/api/files', (req, res) => res.json(db.activePublic()));
 
-/** GET /api/files/:id/download?slug=... */
+/** GET /api/files/:id/download?otp=... */
 app.get('/api/files/:id/download', (req, res) => {
   let f = db.getActive(req.params.id);
-  if (f && f.visibility === 'private') f = null;
-  if (!f && req.query.slug) f = db.getBySlug(req.query.slug);
+  // Public files: direct. OTP files: only if the correct OTP is supplied.
+  if (f && f.visibility !== 'public') f = null;
+  if (!f && req.query.otp) {
+    const match = db.getByOtp(req.query.otp).find(x => x.id === req.params.id);
+    if (match) f = match;
+  }
   if (!f) return res.status(404).json({ error: 'File not found' });
 
   const fp = path.join(UPLOAD_DIR, f.stored_name);
@@ -220,11 +247,14 @@ app.get('/api/files/:id/download', (req, res) => {
   res.sendFile(fp);
 });
 
-/** GET /api/files/:id/pdf?inline=1&slug=... */
+/** GET /api/files/:id/pdf?inline=1&otp=... */
 app.get('/api/files/:id/pdf', (req, res) => {
   let f = db.getActive(req.params.id);
-  if (f && f.visibility === 'private') f = null;
-  if (!f && req.query.slug) f = db.getBySlug(req.query.slug);
+  if (f && f.visibility !== 'public') f = null;
+  if (!f && req.query.otp) {
+    const match = db.getByOtp(req.query.otp).find(x => x.id === req.params.id);
+    if (match) f = match;
+  }
   if (!f) return res.status(404).json({ error: 'File not found' });
 
   let fp;
@@ -249,14 +279,6 @@ app.get('/api/files/:id/pdf', (req, res) => {
   res.sendFile(fp);
 });
 
-/** GET /api/share/:slug — metadata for a private shared file */
-app.get('/api/share/:slug', (req, res) => {
-  const f = db.getBySlug(req.params.slug);
-  if (!f) return res.status(404).json({ error: 'This link is invalid or has expired' });
-  const { uploader_token, ...pub } = f;
-  res.json({ file: pub });
-});
-
 /** DELETE /api/files/:id  (owner token required) */
 app.delete('/api/files/:id', (req, res) => {
   const { token } = req.body;
@@ -264,88 +286,112 @@ app.delete('/api/files/:id', (req, res) => {
   if (!f || f.deleted_at) return res.status(404).json({ error: 'File not found' });
   if (f.uploader_token !== token) return res.status(403).json({ error: 'Not authorized' });
   db.update(f.id, { deleted_at: Date.now() });
-  if (f.visibility !== 'private') io.emit('file:removed', { id: f.id });
+  if (f.visibility === 'public') io.emit('file:removed', { id: f.id });
   res.json({ success: true });
 });
 
-// ─────────────────────────────────────────────
-//  MERGE PDF  — combine multiple PDFs into one (download only, nothing stored)
-// ─────────────────────────────────────────────
-const mergeUpload = multer({
-  storage: multer.memoryStorage(),              // keep in RAM, never touch disk/board
-  limits: { fileSize: 50 * 1024 * 1024, files: 20 },
-  fileFilter: (req, file, cb) => {
-    if (file.mimetype === 'application/pdf') return cb(null, true);
-    cb(Object.assign(new Error('Only PDF files can be merged'), { code: 'INVALID_TYPE' }));
-  },
+// ═════════════════════════════════════════════
+//  OTP SHARING
+// ═════════════════════════════════════════════
+
+/**
+ * POST /api/otp/share  { batch }
+ * Turns all draft files in a batch into a shared OTP session.
+ */
+app.post('/api/otp/share', (req, res) => {
+  const { batch } = req.body;
+  if (!batch) return res.status(400).json({ error: 'Missing batch id' });
+
+  const drafts = db.getDraftsByOwner(batch);
+  if (drafts.length === 0) return res.status(400).json({ error: 'No files to share' });
+
+  const code      = makeOtp();
+  const now       = Date.now();
+  const expiresAt = now + OTP_TTL_MS;
+
+  drafts.forEach(f => db.update(f.id, {
+    is_draft:       false,
+    otp_code:       code,
+    otp_expires_at: expiresAt,
+  }));
+
+  res.json({ success: true, otp: code, expiresAt, count: drafts.length });
 });
 
-app.post('/api/merge-pdf', (req, res, next) => {
-  mergeUpload.array('files', 20)(req, res, (err) => {
-    if (err) {
-      const code = err.code === 'INVALID_TYPE' ? 415 : err.code === 'LIMIT_FILE_SIZE' ? 413 : 400;
-      return res.status(code).json({ error: err.message });
-    }
-    next();
-  });
-}, async (req, res) => {
-  try {
-    const files = req.files || [];
-    if (files.length < 2) return res.status(400).json({ error: 'Upload at least 2 PDFs to merge' });
+// ── Rate limiting for OTP access (in-memory) ──────────────────────
+const otpAttempts = new Map();  // ip → { count, firstAt }
+const OTP_MAX_ATTEMPTS = 5;
+const OTP_BLOCK_MS     = 15 * 60 * 1000;
 
-    // Order comes from the client as a comma-separated list of original indexes
-    let order = files.map((_, i) => i);
-    if (req.body.order) {
-      const parsed = String(req.body.order).split(',').map(n => parseInt(n, 10));
-      if (parsed.length === files.length && parsed.every(n => n >= 0 && n < files.length)) {
-        order = parsed;
-      }
-    }
-
-    const merged = await PDFDocument.create();
-    for (const idx of order) {
-      const src = await PDFDocument.load(files[idx].buffer);
-      const pages = await merged.copyPages(src, src.getPageIndices());
-      pages.forEach(p => merged.addPage(p));
-    }
-
-    const bytes = await merged.save();
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', 'attachment; filename="merged.pdf"');
-    res.send(Buffer.from(bytes));
-  } catch (err) {
-    console.error('Merge failed:', err.message);
-    res.status(500).json({ error: 'Could not merge PDFs. Make sure all files are valid PDFs.' });
+function checkRate(ip) {
+  const now = Date.now();
+  const rec = otpAttempts.get(ip);
+  if (!rec) return { ok: true };
+  if (now - rec.firstAt > OTP_BLOCK_MS) { otpAttempts.delete(ip); return { ok: true }; }
+  if (rec.count >= OTP_MAX_ATTEMPTS) {
+    const waitMin = Math.ceil((OTP_BLOCK_MS - (now - rec.firstAt)) / 60000);
+    return { ok: false, waitMin };
   }
+  return { ok: true };
+}
+function recordFail(ip) {
+  const now = Date.now();
+  const rec = otpAttempts.get(ip);
+  if (!rec || now - rec.firstAt > OTP_BLOCK_MS) otpAttempts.set(ip, { count: 1, firstAt: now });
+  else rec.count++;
+}
+
+/**
+ * POST /api/otp/access  { otp }
+ * Returns the files under a valid OTP. Rate-limited.
+ */
+app.post('/api/otp/access', (req, res) => {
+  const ip  = req.ip || req.headers['x-forwarded-for'] || 'unknown';
+  const otp = String(req.body.otp || '').trim();
+
+  const rate = checkRate(ip);
+  if (!rate.ok) return res.status(429).json({ error: `Too many attempts. Try again in ${rate.waitMin} min.` });
+
+  if (!/^\d{4}$/.test(otp)) { recordFail(ip); return res.status(400).json({ error: 'Enter a valid 4-digit code' }); }
+
+  const files = db.getByOtp(otp);
+  if (files.length === 0) {
+    recordFail(ip);
+    return res.status(404).json({ error: 'Invalid or expired code' });
+  }
+
+  // success → reset attempts for this ip
+  otpAttempts.delete(ip);
+  res.json({
+    success: true,
+    files: files.map(f => {
+      const { uploader_token, share_slug, otp_code, owner_batch, otp_expires_at, ...pub } = f;
+      return pub;
+    }),
+  });
 });
 
 // ─────────────────────────────────────────────
-//  ADMIN MIDDLEWARE
+//  ADMIN
 // ─────────────────────────────────────────────
 const requireAdmin = (req, res, next) =>
   req.session?.isAdmin ? next() : res.status(401).json({ error: 'Admin authentication required' });
 
 app.post('/api/admin/login', (req, res) => {
-  if (req.body.password === ADMIN_PASS) {
-    req.session.isAdmin = true;
-    res.json({ success: true });
-  } else {
-    res.status(401).json({ error: 'Invalid password' });
-  }
+  if (req.body.password === ADMIN_PASS) { req.session.isAdmin = true; res.json({ success: true }); }
+  else res.status(401).json({ error: 'Invalid password' });
 });
-
 app.post('/api/admin/logout', (req, res) => { req.session.destroy(); res.json({ success: true }); });
 app.get('/api/admin/session', (req, res) => res.json({ isAdmin: !!req.session?.isAdmin }));
 
 app.get('/api/admin/files', requireAdmin, (req, res) => {
   const { search = '', status = '', deleted = '0' } = req.query;
-  const files = db.list({
-    deleted: deleted === '1' ? true : false,
+  res.json(db.list({
+    deleted: deleted === '1',
     search:  search || undefined,
     status:  status || undefined,
     limit:   500,
-  });
-  res.json(files);
+  }));
 });
 
 app.delete('/api/admin/files/:id', requireAdmin, (req, res) => {
@@ -360,7 +406,8 @@ app.patch('/api/admin/files/:id/restore', requireAdmin, (req, res) => {
   const f = db.getById(req.params.id);
   if (!f) return res.status(404).json({ error: 'File not found' });
   db.update(f.id, { deleted_at: null });
-  if (f.expires_at > Date.now() && f.visibility !== 'private') io.emit('file:added', publicFile({ ...f, deleted_at: null }));
+  if (f.expires_at > Date.now() && f.visibility === 'public' && !f.is_draft)
+    io.emit('file:added', publicFile({ ...f, deleted_at: null }));
   res.json({ success: true });
 });
 
@@ -375,10 +422,7 @@ app.patch('/api/admin/files/:id', requireAdmin, (req, res) => {
   res.json({ success: true });
 });
 
-app.get('/api/admin/stats', requireAdmin, (req, res) => {
-  const overview = db.stats();
-  res.json({ overview });
-});
+app.get('/api/admin/stats', requireAdmin, (req, res) => res.json({ overview: db.stats() }));
 
 app.put('/api/admin/settings', requireAdmin, (req, res) => {
   const days = parseInt(req.body.expiry_days);
@@ -389,7 +433,6 @@ app.put('/api/admin/settings', requireAdmin, (req, res) => {
 // ═════════════════════════════════════════════
 //  NOTES API
 // ═════════════════════════════════════════════
-
 app.get('/api/notes', (req, res) => res.json(db.notes.list()));
 
 app.post('/api/notes', (req, res) => {
@@ -397,13 +440,8 @@ app.post('/api/notes', (req, res) => {
   if (!content.trim() && !title.trim()) return res.status(400).json({ error: 'Note is empty' });
   const now = Date.now();
   const rec = {
-    id:         uuid(),
-    title:      String(title).slice(0, 200),
-    content:    String(content).slice(0, 50_000),
-    color,
-    created_at: now,
-    updated_at: now,
-    owner_token: uuid(),
+    id: uuid(), title: String(title).slice(0, 200), content: String(content).slice(0, 50_000),
+    color, created_at: now, updated_at: now, owner_token: uuid(),
   };
   db.notes.insert(rec);
   io.emit('note:added', db.notes.publicOf(rec));
@@ -435,30 +473,19 @@ app.delete('/api/notes/:id', (req, res) => {
 // ═════════════════════════════════════════════
 //  FEEDBACK API
 // ═════════════════════════════════════════════
-
-/** POST /api/feedback  { name, type, message } — anyone can submit */
 app.post('/api/feedback', (req, res) => {
   const { name = 'Anonymous', type = 'General', message = '' } = req.body;
   if (!message.trim()) return res.status(400).json({ error: 'Message is required' });
-  const rec = {
-    id:         uuid(),
-    name:       String(name).slice(0, 100) || 'Anonymous',
-    type:       String(type).slice(0, 40),
-    message:    String(message).slice(0, 5000),
-    resolved:   false,
-    featured:   false,
-    created_at: Date.now(),
-  };
-  db.feedback.insert(rec);
+  db.feedback.insert({
+    id: uuid(), name: String(name).slice(0, 100) || 'Anonymous',
+    type: String(type).slice(0, 40), message: String(message).slice(0, 5000),
+    resolved: false, featured: false, created_at: Date.now(),
+  });
   res.json({ success: true });
 });
 
-/** GET /api/feedback/featured — public list for the homepage */
-app.get('/api/feedback/featured', (req, res) => {
-  res.json({ items: db.feedback.featured() });
-});
+app.get('/api/feedback/featured', (req, res) => res.json({ items: db.feedback.featured() }));
 
-/** GET /api/admin/feedback — admin only */
 app.get('/api/admin/feedback', requireAdmin, (req, res) => {
   const { search = '', resolved } = req.query;
   const opts = { search: search || undefined };
@@ -467,33 +494,28 @@ app.get('/api/admin/feedback', requireAdmin, (req, res) => {
   res.json({ items: db.feedback.list(opts), stats: db.feedback.stats() });
 });
 
-/** PATCH /api/admin/feedback/:id/resolve — toggle resolved */
 app.patch('/api/admin/feedback/:id/resolve', requireAdmin, (req, res) => {
   const ok = db.feedback.update(req.params.id, { resolved: !!req.body.resolved });
   ok ? res.json({ success: true }) : res.status(404).json({ error: 'Not found' });
 });
 
-/** PATCH /api/admin/feedback/:id/feature — toggle featured */
 app.patch('/api/admin/feedback/:id/feature', requireAdmin, (req, res) => {
   const ok = db.feedback.update(req.params.id, { featured: !!req.body.featured });
   ok ? res.json({ success: true }) : res.status(404).json({ error: 'Not found' });
 });
 
-/** DELETE /api/admin/feedback/:id */
 app.delete('/api/admin/feedback/:id', requireAdmin, (req, res) => {
   db.feedback.remove(req.params.id);
   res.json({ success: true });
 });
 
-/** GET /api/admin/feedback/export — CSV download */
 app.get('/api/admin/feedback/export', requireAdmin, (req, res) => {
   const rows = db.feedback.list();
   const esc = s => `"${String(s).replace(/"/g, '""')}"`;
   const csv = ['Name,Type,Message,Status,Featured,Submitted']
     .concat(rows.map(r => [
       esc(r.name), esc(r.type), esc(r.message),
-      r.resolved ? 'Resolved' : 'Pending',
-      r.featured ? 'Yes' : 'No',
+      r.resolved ? 'Resolved' : 'Pending', r.featured ? 'Yes' : 'No',
       esc(new Date(r.created_at).toLocaleString('en-IN')),
     ].join(','))).join('\n');
   res.setHeader('Content-Type', 'text/csv');
@@ -501,8 +523,56 @@ app.get('/api/admin/feedback/export', requireAdmin, (req, res) => {
   res.send(csv);
 });
 
+// ═════════════════════════════════════════════
+//  MERGE PDF
+// ═════════════════════════════════════════════
+const mergeUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 50 * 1024 * 1024, files: 20 },
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype === 'application/pdf') return cb(null, true);
+    cb(Object.assign(new Error('Only PDF files can be merged'), { code: 'INVALID_TYPE' }));
+  },
+});
+
+app.post('/api/merge-pdf', (req, res, next) => {
+  mergeUpload.array('files', 20)(req, res, (err) => {
+    if (err) {
+      const code = err.code === 'INVALID_TYPE' ? 415 : err.code === 'LIMIT_FILE_SIZE' ? 413 : 400;
+      return res.status(code).json({ error: err.message });
+    }
+    next();
+  });
+}, async (req, res) => {
+  try {
+    const files = req.files || [];
+    if (files.length < 2) return res.status(400).json({ error: 'Upload at least 2 PDFs to merge' });
+
+    let order = files.map((_, i) => i);
+    if (req.body.order) {
+      const parsed = String(req.body.order).split(',').map(n => parseInt(n, 10));
+      if (parsed.length === files.length && parsed.every(n => n >= 0 && n < files.length)) order = parsed;
+    }
+
+    const merged = await PDFDocument.create();
+    for (const idx of order) {
+      const src = await PDFDocument.load(files[idx].buffer);
+      const pages = await merged.copyPages(src, src.getPageIndices());
+      pages.forEach(p => merged.addPage(p));
+    }
+
+    const bytes = await merged.save();
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename="merged.pdf"');
+    res.send(Buffer.from(bytes));
+  } catch (err) {
+    console.error('Merge failed:', err.message);
+    res.status(500).json({ error: 'Could not merge PDFs. Make sure all files are valid PDFs.' });
+  }
+});
+
 // ─────────────────────────────────────────────
-//  SOCKET.IO  (files, notes, live presence)
+//  SOCKET.IO
 // ─────────────────────────────────────────────
 let liveUsers = 0;
 io.on('connection', (socket) => {
@@ -510,7 +580,6 @@ io.on('connection', (socket) => {
   io.emit('presence', { users: liveUsers });
   socket.emit('init',       db.activePublic());
   socket.emit('notes:init', db.notes.list());
-
   socket.on('disconnect', () => {
     liveUsers = Math.max(0, liveUsers - 1);
     io.emit('presence', { users: liveUsers });
@@ -520,15 +589,28 @@ io.on('connection', (socket) => {
 // ─────────────────────────────────────────────
 //  CRON JOBS
 // ─────────────────────────────────────────────
+// Every 15 min: delete unshared drafts older than 1 hour
+cron.schedule('*/15 * * * *', () => {
+  const cutoff = Date.now() - DRAFT_TTL_MS;
+  const stale = db.list({ deleted: false }).filter(f => f.is_draft && f.uploaded_at <= cutoff);
+  stale.forEach(f => {
+    db.update(f.id, { deleted_at: Date.now() });
+    const op = path.join(UPLOAD_DIR, f.stored_name);
+    if (fs.existsSync(op)) fs.unlinkSync(op);
+  });
+  if (stale.length) console.log(`🧹  Removed ${stale.length} unshared draft(s)`);
+});
+
+// Every hour: soft-delete expired files
 cron.schedule('0 * * * *', () => {
   const now = Date.now();
-  const all = db.list({ deleted: false });
-  all.filter(f => f.expires_at <= now).forEach(f => {
+  db.list({ deleted: false }).filter(f => f.expires_at <= now).forEach(f => {
     db.update(f.id, { deleted_at: now });
-    io.emit('file:removed', { id: f.id });
+    if (f.visibility === 'public') io.emit('file:removed', { id: f.id });
   });
 });
 
+// Every night at 3 AM: permanently purge old soft-deleted files
 cron.schedule('0 3 * * *', () => {
   const cutoff = Date.now() - PERM_DEL_DAYS * 86_400_000;
   const old = db.hardDeleteWhere(f => f.deleted_at && f.deleted_at <= cutoff);
@@ -558,7 +640,6 @@ app.get(/^(?!\/api).*/, (req, res, next) => {
 httpServer.listen(PORT, () => {
   console.log(`\n🚀  XIE Files  →  http://localhost:${PORT}`);
   console.log(`🔑  Admin      →  http://localhost:${PORT}/admin.html`);
-  console.log(`📁  Uploads    →  ${UPLOAD_DIR}`);
-  console.log(`⏰  Expiry     →  ${EXPIRY_DAYS()} days`);
+  console.log(`⏰  Expiry     →  ${EXPIRY_DAYS()} days · OTP 24h · drafts 1h`);
   console.log(`🔑  Admin pass →  ${ADMIN_PASS.slice(0,3)}***\n`);
 });

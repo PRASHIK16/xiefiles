@@ -89,7 +89,7 @@ export default function PreviewModal({ file, onClose }) {
           </button>
         </>
       }>
-      <div className="bg-slate-700 dark:bg-slate-950 h-[70vh] flex items-center justify-center">
+      <div className="bg-slate-700 dark:bg-slate-950 flex-1 flex items-center justify-center">
         {kind === 'pdf'   && <iframe src={inlineUrl} title="Preview" className="w-full h-full border-0" />}
         {kind === 'image' && <img src={inlineUrl} alt={file.original_name} className="max-w-full max-h-full object-contain" />}
         {kind === 'text'  && <TextPreview url={rawUrl} />}

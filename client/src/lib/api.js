@@ -32,6 +32,9 @@ export const api = {
 
   // Feedback
   submitFeedback:(body)        => req('/api/feedback', { method: 'POST', body }),
+  accessOtp:     (otp)         => req('/api/otp/access', { method: 'POST', body: { otp } }),
+  otpDownloadUrl:(id, otp)     => `/api/files/${id}/download?otp=${encodeURIComponent(otp)}`,
+  otpPdfUrl:     (id, otp, inline) => `/api/files/${id}/pdf?otp=${encodeURIComponent(otp)}${inline ? '&inline=1' : ''}`,
 }
 
 // ── Uploader-token store (localStorage) ──────────────────────────

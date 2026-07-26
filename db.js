@@ -51,6 +51,25 @@ function getBySlug(slug) {
   return _store.find(f => f.share_slug === slug && !f.deleted_at && f.expires_at > now) || null;
 }
 
+/** Get all active files under an OTP code (not draft, not expired, not deleted) */
+function getByOtp(code) {
+  if (!code) return [];
+  const now = Date.now();
+  return _store.filter(f =>
+    f.otp_code === code &&
+    !f.is_draft &&
+    !f.deleted_at &&
+    f.expires_at > now &&
+    (f.otp_expires_at ? f.otp_expires_at > now : true)
+  ).sort((a, b) => a.uploaded_at - b.uploaded_at);
+}
+
+/** Get all draft files owned by a given uploader token (for the Share step) */
+function getDraftsByOwner(ownerToken) {
+  if (!ownerToken) return [];
+  return _store.filter(f => f.is_draft && f.owner_batch === ownerToken && !f.deleted_at);
+}
+
 /**
  * List files matching filter criteria (returns shallow copies, no uploader_token)
  * opts: { deleted, search, status, limit }
@@ -80,9 +99,14 @@ function list(opts = {}) {
 function activePublic() {
   const now = Date.now();
   return _store
-    .filter(f => !f.deleted_at && f.expires_at > now && f.visibility !== 'private')
+    .filter(f =>
+      !f.deleted_at &&
+      f.expires_at > now &&
+      f.visibility === 'public' &&   // only public — never private, otp, or draft
+      !f.is_draft
+    )
     .sort((a, b) => b.uploaded_at - a.uploaded_at)
-    .map(({ uploader_token, share_slug, ...pub }) => pub);
+    .map(({ uploader_token, share_slug, otp_code, ...pub }) => pub);
 }
 
 /** Update arbitrary fields on a record by id */
@@ -124,7 +148,7 @@ function stats() {
   };
 }
 
-module.exports = { insert, getById, getActive, getBySlug, list, activePublic, update, hardDelete, hardDeleteWhere, stats };
+module.exports = { insert, getById, getActive, getBySlug, getByOtp, getDraftsByOwner, list, activePublic, update, hardDelete, hardDeleteWhere, stats };
 
 // ════════════════════════════════════════════════════════════════
 //  NOTES + FEEDBACK collections (separate JSON files)

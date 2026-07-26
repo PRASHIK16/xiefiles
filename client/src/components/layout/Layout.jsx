@@ -13,8 +13,8 @@ export default function Layout() {
       <Header onMenu={() => setMenuOpen(true)} />
       <div className="flex flex-1 min-h-0">
         <Sidebar open={menuOpen} onClose={() => setMenuOpen(false)} />
-        <main className="flex-1 min-w-0 overflow-auto">
-          <div className="max-w-3xl mx-auto px-4 sm:px-6 py-6">
+        <main className="flex-1 min-w-0 overflow-auto flex flex-col">
+          <div className="max-w-3xl mx-auto w-full px-4 sm:px-6 py-6 flex-1">
             <Outlet />
           </div>
           <Footer />

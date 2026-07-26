@@ -1,18 +1,24 @@
 import { useRef, useState } from 'react'
-import { UploadCloud, Loader2, Globe, Lock, Copy, Check, X } from 'lucide-react'
-import QRCode from 'qrcode'
+import { UploadCloud, Loader2, Globe, KeyRound, Copy, Check, X, FileText, Send } from 'lucide-react'
 import { useToast } from '../../context/ToastContext'
 import { useFiles } from '../../context/FilesContext'
-import { tokens, privateLinks, api } from '../../lib/api'
+import { tokens } from '../../lib/api'
+import { bytes } from '../../lib/format'
 
 export default function UploadZone() {
   const inputRef = useRef(null)
   const toast = useToast()
   const { upsertLocal } = useFiles()
+
+  const [mode, setMode] = useState('public')        // 'public' | 'otp'
   const [drag, setDrag] = useState(false)
-  const [progress, setProgress] = useState(null)      // { name, pct }
-  const [visibility, setVisibility] = useState('public')
-  const [sharePanel, setSharePanel] = useState(null)  // { link, qr, name }
+  const [progress, setProgress] = useState(null)     // { name, pct }
+
+  // OTP draft state
+  const [batch, setBatch] = useState(null)           // batch id for this OTP session
+  const [drafts, setDrafts] = useState([])           // uploaded draft files (this session)
+  const [sharing, setSharing] = useState(false)
+  const [otpResult, setOtpResult] = useState(null)   // { otp, count }
   const [copied, setCopied] = useState(false)
 
   const openPicker = () => inputRef.current?.click()
@@ -25,33 +31,31 @@ export default function UploadZone() {
     setProgress({ name: file.name, pct: 0 })
     const form = new FormData()
     form.append('file', file)
-    form.append('visibility', visibility)              // ← tell server public/private
+    form.append('visibility', mode)                  // 'public' or 'otp'
+    if (mode === 'otp') {
+      // reuse the same batch for all files in this OTP session
+      const b = batch || crypto.randomUUID()
+      if (!batch) setBatch(b)
+      form.append('batch', b)
+    }
     const xhr = new XMLHttpRequest()
     xhr.open('POST', '/api/upload')
     xhr.upload.onprogress = e => {
       if (e.lengthComputable) setProgress({ name: file.name, pct: Math.round(e.loaded / e.total * 100) })
     }
-    xhr.onload = async () => {
+    xhr.onload = () => {
       setProgress(null)
       if (inputRef.current) inputRef.current.value = ''
       try {
         const res = JSON.parse(xhr.responseText)
         if (xhr.status === 200 && res.success) {
           tokens.fileSet(res.file.id, res.uploaderToken)
-
-          if (res.visibility === 'private' && res.shareSlug) {
-            // Private: DON'T add to public list. Save link + show share panel.
-            const link = api.buildShareLink(res.shareSlug)
-            privateLinks.add({
-              slug: res.shareSlug, id: res.file.id, name: res.file.original_name,
-              size: res.file.size, mime: res.file.mime_type, at: Date.now(),
-            })
-            let qr = ''
-            try { qr = await QRCode.toDataURL(link, { width: 220, margin: 1 }) } catch {}
-            setSharePanel({ link, qr, name: res.file.original_name })
-            toast.success('Private file ready — copy your link')
+          if (res.visibility === 'otp') {
+            // draft — keep it locally, don't touch the public board
+            if (res.batch && !batch) setBatch(res.batch)
+            setDrafts(prev => [...prev, res.file])
+            setOtpResult(null)   // new upload invalidates any previous OTP for this session
           } else {
-            // Public: show on board as before.
             upsertLocal({ ...res.file, _self: true })
             toast.success('Uploaded')
           }
@@ -63,36 +67,58 @@ export default function UploadZone() {
     xhr.send(form)
   })
 
-  const copyLink = async () => {
+  const shareOtp = async () => {
+    if (!batch || drafts.length === 0) { toast.error('Add files first'); return }
+    setSharing(true)
     try {
-      await navigator.clipboard.writeText(sharePanel.link)
+      const res = await fetch('/api/otp/share', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ batch }),
+      })
+      const data = await res.json()
+      if (data.success) {
+        setOtpResult({ otp: data.otp, count: data.count })
+        toast.success('OTP generated')
+      } else toast.error(data.error || 'Could not share')
+    } catch { toast.error('Server error') }
+    setSharing(false)
+  }
+
+  const copyOtp = async () => {
+    try {
+      await navigator.clipboard.writeText(otpResult.otp)
       setCopied(true); setTimeout(() => setCopied(false), 1800)
     } catch { toast.error('Could not copy') }
   }
 
+  const resetOtp = () => {
+    setBatch(null); setDrafts([]); setOtpResult(null)
+  }
+
+  const isOtp = mode === 'otp'
+
   return (
     <div>
-      {/* Public / Private toggle */}
+      {/* Mode toggle */}
       <div className="flex items-center gap-1.5 mb-3">
-        <button onClick={() => setVisibility('public')}
-          className={`chip transition-colors ${visibility === 'public'
+        <button onClick={() => setMode('public')}
+          className={`chip transition-colors ${mode === 'public'
             ? 'bg-brand-500 text-white'
             : 'bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'}`}>
           <Globe size={13} /> Public
         </button>
-        <button onClick={() => setVisibility('private')}
-          className={`chip transition-colors ${visibility === 'private'
+        <button onClick={() => setMode('otp')}
+          className={`chip transition-colors ${mode === 'otp'
             ? 'bg-slate-800 text-white dark:bg-slate-200 dark:text-slate-900'
             : 'bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'}`}>
-          <Lock size={13} /> Private
+          <KeyRound size={13} /> OTP Share
         </button>
         <span className="text-xs text-slate-400 ml-1">
-          {visibility === 'public'
-            ? 'Visible to everyone on campus'
-            : 'Only reachable by a secret link'}
+          {isOtp ? 'Files shared with a 4-digit code' : 'Visible to everyone on campus'}
         </span>
       </div>
 
+      {/* Drop zone */}
       <div
         onClick={e => e.target === e.currentTarget && openPicker()}
         onDragOver={e => { e.preventDefault(); setDrag(true) }}
@@ -107,10 +133,10 @@ export default function UploadZone() {
         <div className="pointer-events-none flex flex-col items-center gap-2">
           <div className={`w-14 h-14 rounded-2xl flex items-center justify-center transition-all
             ${drag ? 'bg-brand-500 text-white' : 'bg-brand-100 text-brand-600 dark:bg-brand-900/40 dark:text-brand-400 group-hover:scale-105'}`}>
-            {visibility === 'private' ? <Lock size={24} /> : <UploadCloud size={26} />}
+            {isOtp ? <KeyRound size={24} /> : <UploadCloud size={26} />}
           </div>
           <p className="font-semibold text-[15px] mt-1">
-            {visibility === 'private' ? 'Drop a private file' : 'Drop files to share instantly'}
+            {isOtp ? 'Add files to share with a code' : 'Drop files to share instantly'}
           </p>
           <p className="text-sm text-slate-500 dark:text-slate-400">
             or <span className="text-brand-600 dark:text-brand-400 font-medium">click to browse</span>
@@ -139,44 +165,57 @@ export default function UploadZone() {
         </div>
       )}
 
-      {/* Private share panel — the one moment to grab the link */}
-      {sharePanel && (
-        <div className="card mt-3 p-4 animate-fadeUp border-brand-300 dark:border-brand-800">
-          <div className="flex items-start justify-between gap-2 mb-3">
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg bg-slate-800 text-white dark:bg-slate-200 dark:text-slate-900 flex items-center justify-center shrink-0">
-                <Lock size={15} />
+      {/* OTP staging area — shows draft files + Share button */}
+      {isOtp && drafts.length > 0 && !otpResult && (
+        <div className="card mt-3 p-4 animate-fadeUp">
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-sm font-semibold">{drafts.length} file{drafts.length !== 1 ? 's' : ''} ready to share</p>
+            <button onClick={resetOtp} className="text-xs text-slate-400 hover:text-red-500">Clear</button>
+          </div>
+          <div className="flex flex-col gap-2 mb-4">
+            {drafts.map(f => (
+              <div key={f.id} className="flex items-center gap-2.5 text-sm">
+                <div className="w-8 h-8 rounded-lg bg-slate-100 dark:bg-slate-800 flex items-center justify-center shrink-0">
+                  <FileText size={15} className="text-slate-500" />
+                </div>
+                <span className="truncate flex-1">{f.original_name}</span>
+                <span className="text-xs text-slate-400 shrink-0">{bytes(f.size)}</span>
               </div>
-              <div>
-                <p className="text-sm font-semibold">Private link ready</p>
-                <p className="text-xs text-slate-400 truncate max-w-[220px]">{sharePanel.name}</p>
-              </div>
-            </div>
-            <button onClick={() => setSharePanel(null)} className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400" aria-label="Close">
+            ))}
+          </div>
+          <button onClick={shareOtp} disabled={sharing}
+            className="btn btn-primary w-full justify-center disabled:opacity-50">
+            {sharing ? <><Loader2 size={16} className="animate-spin" /> Generating…</>
+                     : <><Send size={16} /> Share &amp; Get OTP</>}
+          </button>
+        </div>
+      )}
+
+      {/* OTP result — the code to share */}
+      {otpResult && (
+        <div className="card mt-3 p-5 animate-fadeUp border-brand-300 dark:border-brand-800 text-center">
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-sm font-semibold flex items-center gap-2">
+              <KeyRound size={15} className="text-brand-500" />
+              {otpResult.count} file{otpResult.count !== 1 ? 's' : ''} shared
+            </p>
+            <button onClick={resetOtp} className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400" aria-label="Done">
               <X size={16} />
             </button>
           </div>
 
-          <div className="flex gap-3 items-center flex-col sm:flex-row">
-            {sharePanel.qr && (
-              <img src={sharePanel.qr} alt="QR code" className="w-28 h-28 rounded-lg border border-slate-200 dark:border-slate-700 shrink-0" />
-            )}
-            <div className="flex-1 w-full min-w-0">
-              <p className="text-xs text-amber-600 dark:text-amber-400 font-medium mb-1.5">
-                ⚠ Save this link now — private files don't appear on the board.
-              </p>
-              <div className="flex gap-1.5">
-                <input readOnly value={sharePanel.link}
-                  onFocus={e => e.target.select()}
-                  className="input text-xs flex-1 min-w-0" />
-                <button onClick={copyLink} className="btn btn-primary text-xs px-3 shrink-0">
-                  {copied ? <Check size={14} /> : <Copy size={14} />}
-                  {copied ? 'Copied' : 'Copy'}
-                </button>
-              </div>
-              <p className="text-[11px] text-slate-400 mt-1.5">Also saved under “My Private Links” below.</p>
+          <p className="text-xs text-slate-400 mb-2">Share this code — anyone can open the files with it</p>
+          <div className="flex items-center justify-center gap-2 mb-3">
+            <div className="text-4xl font-extrabold tracking-[0.3em] font-display text-brand-600 dark:text-brand-400 pl-[0.3em]">
+              {otpResult.otp}
             </div>
+            <button onClick={copyOtp} className="btn btn-ghost text-xs px-2.5 py-2 shrink-0" title="Copy">
+              {copied ? <Check size={15} /> : <Copy size={15} />}
+            </button>
           </div>
+          <p className="text-[11px] text-amber-600 dark:text-amber-400">
+            ⚠ Valid for 24 hours. To access: open “Access with OTP” and enter this code.
+          </p>
         </div>
       )}
     </div>

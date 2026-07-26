@@ -50,10 +50,10 @@ export function Modal({ open, onClose, title, children, actions, wide }) {
 
   if (!open) return null
   return (
-    <div className="fixed inset-0 z-[500] flex items-center justify-center p-4
+    <div className="fixed inset-0 z-[500] flex items-center justify-center p-3 sm:p-5
                     bg-slate-950/60 backdrop-blur-sm animate-popIn"
          onClick={e => e.target === e.currentTarget && onClose?.()}>
-      <div className={`card shadow-soft w-full ${wide ? 'max-w-4xl' : 'max-w-lg'} max-h-[92vh] flex flex-col overflow-hidden`}>
+      <div className={`card shadow-soft w-full ${wide ? 'max-w-4xl' : 'max-w-lg'} max-h-[90vh] flex flex-col overflow-hidden`}>
         <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-200 dark:border-slate-800 shrink-0">
           <h3 className="font-semibold text-[15px] truncate pr-3">{title}</h3>
           <div className="flex items-center gap-2">
@@ -64,7 +64,7 @@ export function Modal({ open, onClose, title, children, actions, wide }) {
             </button>
           </div>
         </div>
-        <div className="flex-1 overflow-auto">{children}</div>
+        <div className="flex-1 min-h-0 overflow-auto">{children}</div>
       </div>
     </div>
   )
