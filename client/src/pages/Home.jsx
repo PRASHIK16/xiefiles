@@ -1,13 +1,13 @@
 import { useState, useMemo, useEffect } from 'react'
-import { Search, SlidersHorizontal, Lock, Copy, Check, ExternalLink, Trash2, Quote } from 'lucide-react'
+import { Search, SlidersHorizontal, Quote, ArrowLeft, Download, Printer, FileDown, Loader2 } from 'lucide-react'
 import UploadZone from '../components/files/UploadZone'
 import FileCard from '../components/files/FileCard'
-import PreviewModal from '../components/files/PreviewModal'
+import FileIcon from '../components/files/FileIcon'
 import { EmptyState, FileCardSkeleton } from '../components/ui'
 import { useFiles } from '../context/FilesContext'
 import { useToast } from '../context/ToastContext'
-import { fileCategory, bytes, timeAgo } from '../lib/format'
-import { privateLinks, api } from '../lib/api'
+import { fileCategory, previewKind, mimeLabel } from '../lib/format'
+import { api } from '../lib/api'
 
 const FILTERS = [
   { key: 'all',   label: 'All' },
@@ -59,68 +59,114 @@ function FeaturedFeedback() {
   )
 }
 
-// ── My Private Links (localStorage-backed) ─────────────────────────
-function PrivateLinks() {
-  const toast = useToast()
-  const [items, setItems] = useState([])
-  const [copiedSlug, setCopiedSlug] = useState(null)
+// ── Text / CSV preview (fetches the file as text) ─────────────────
+function TextPreview({ url }) {
+  const [state, setState] = useState('loading')
+  const [text, setText] = useState('')
 
-  const refresh = () => setItems(privateLinks.all())
-  useEffect(() => { refresh() }, [])
   useEffect(() => {
-    const onFocus = () => refresh()
-    window.addEventListener('focus', onFocus)
-    return () => window.removeEventListener('focus', onFocus)
-  }, [])
+    let alive = true
+    fetch(url)
+      .then(r => r.text())
+      .then(t => { if (alive) { setText(t.slice(0, 100000)); setState('ok') } })
+      .catch(() => { if (alive) setState('error') })
+    return () => { alive = false }
+  }, [url])
 
-  if (items.length === 0) return null
+  if (state === 'loading')
+    return <div className="h-full flex items-center justify-center text-slate-400"><Loader2 className="animate-spin" size={22} /></div>
+  if (state === 'error')
+    return <div className="h-full flex items-center justify-center text-slate-400 text-sm">Couldn’t load preview. Try downloading.</div>
 
-  const copy = async (slug) => {
-    try {
-      await navigator.clipboard.writeText(api.buildShareLink(slug))
-      setCopiedSlug(slug); setTimeout(() => setCopiedSlug(null), 1600)
-    } catch { toast.error('Could not copy') }
-  }
+  return (
+    <pre className="w-full h-full overflow-auto p-4 text-xs leading-relaxed text-slate-100 whitespace-pre-wrap font-mono">
+      {text}
+    </pre>
+  )
+}
 
-  const remove = (slug) => {
-    privateLinks.remove(slug)
-    refresh()
-    toast.info('Removed from this device')
+// ── Inline preview — fills the content area (Google Drive style) ──
+function InlinePreview({ file, onBack }) {
+  const toast = useToast()
+  const kind = previewKind(file)
+  const inlineUrl = api.pdfUrl(file.id, true)
+  const rawUrl    = api.downloadUrl(file.id)
+  const canPrint  = kind === 'pdf' || kind === 'image'
+
+  const download = () => { window.location.href = rawUrl }
+
+  const print = () => {
+    if (!canPrint) { toast.info('Download this file to print it'); return }
+    let frame = document.getElementById('xie-print-frame')
+    if (!frame) {
+      frame = document.createElement('iframe')
+      frame.id = 'xie-print-frame'
+      frame.style.cssText = 'position:fixed;left:-9999px;top:-9999px;width:0;height:0;border:0'
+      document.body.appendChild(frame)
+    }
+    frame.src = inlineUrl
+    frame.onload = () => { try { frame.contentWindow.focus(); frame.contentWindow.print() } catch { window.open(inlineUrl, '_blank') } }
+    toast.info('Opening print dialog…')
   }
 
   return (
-    <div className="mt-8">
-      <div className="flex items-center gap-2 mb-3">
-        <Lock size={15} className="text-slate-400" />
-        <h2 className="font-display text-sm font-bold uppercase tracking-wider text-slate-500">My Private Links</h2>
+    <div className="flex flex-col" style={{ height: 'calc(100vh - 140px)', minHeight: '400px' }}>
+      {/* Toolbar */}
+      <div className="flex items-center justify-between gap-3 mb-3 shrink-0">
+        <button onClick={onBack} className="btn btn-ghost text-sm">
+          <ArrowLeft size={16} /> Back to files
+        </button>
+        <div className="flex items-center gap-1.5 min-w-0">
+          <span className="text-sm font-medium truncate hidden sm:block max-w-[240px]" title={file.original_name}>
+            {file.original_name}
+          </span>
+          {canPrint && (
+            <button onClick={print} className="btn btn-ghost text-xs px-3 py-1.5">
+              <Printer size={14} /> <span className="hidden sm:inline">Print</span>
+            </button>
+          )}
+          <button onClick={download} className="btn btn-primary text-xs px-3 py-1.5">
+            <Download size={14} /> <span className="hidden sm:inline">Download</span>
+          </button>
+        </div>
       </div>
-      <p className="text-xs text-slate-400 mb-3">
-        Saved on this device only. These files aren’t on the public board — share the link to give access.
-      </p>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        {items.map(it => (
-          <div key={it.slug} className="card p-3.5 flex items-center gap-3">
-            <div className="w-9 h-9 rounded-lg bg-slate-800 text-white dark:bg-slate-200 dark:text-slate-900 flex items-center justify-center shrink-0">
-              <Lock size={15} />
-            </div>
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium truncate" title={it.name}>{it.name}</p>
-              <p className="text-[11px] text-slate-400">{bytes(it.size)} · {timeAgo(it.at)}</p>
-            </div>
-            <div className="flex items-center gap-1 shrink-0">
-              <button onClick={() => copy(it.slug)} className="btn btn-ghost text-xs px-2 py-1.5" title="Copy link">
-                {copiedSlug === it.slug ? <Check size={14} /> : <Copy size={14} />}
-              </button>
-              <a href={api.buildShareLink(it.slug)} target="_blank" rel="noreferrer"
-                 className="btn btn-ghost text-xs px-2 py-1.5" title="Open">
-                <ExternalLink size={14} />
-              </a>
-              <button onClick={() => remove(it.slug)} className="btn btn-danger text-xs px-2 py-1.5" title="Remove from device">
-                <Trash2 size={14} />
-              </button>
-            </div>
+
+      {/* Viewer — fills all remaining space */}
+      <div className="flex-1 min-h-0 rounded-xl2 overflow-hidden border border-slate-200 dark:border-slate-800 bg-slate-700 dark:bg-slate-950">
+        {kind === 'pdf' && (
+          <iframe src={inlineUrl} title={file.original_name} className="w-full h-full border-0" />
+        )}
+        {kind === 'image' && (
+          <div className="w-full h-full flex items-center justify-center overflow-auto">
+            <img src={inlineUrl} alt={file.original_name} className="max-w-full max-h-full object-contain" />
           </div>
-        ))}
+        )}
+        {kind === 'text' && <TextPreview url={rawUrl} />}
+        {kind === 'audio' && (
+          <div className="w-full h-full flex flex-col items-center justify-center gap-4">
+            <FileIcon mime={file.mime_type} />
+            <audio src={rawUrl} controls className="w-[min(80vw,420px)]" />
+          </div>
+        )}
+        {kind === 'video' && (
+          <div className="w-full h-full flex items-center justify-center">
+            <video src={rawUrl} controls className="max-w-full max-h-full" />
+          </div>
+        )}
+        {kind === 'none' && (
+          <div className="w-full h-full flex flex-col items-center justify-center gap-4 text-center px-6">
+            <FileIcon mime={file.mime_type} />
+            <div>
+              <p className="font-semibold text-slate-200">Preview not available</p>
+              <p className="text-sm text-slate-400 mt-1">
+                {mimeLabel(file.mime_type)} files can’t be shown in the browser — download to open it.
+              </p>
+            </div>
+            <button onClick={download} className="btn btn-primary text-sm">
+              <FileDown size={16} /> Download to open
+            </button>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -141,6 +187,15 @@ export default function Home() {
       return fileCategory(f.mime_type) === filter
     })
   }, [files, q, filter])
+
+  // ── Inline preview view — replaces the list ─────────────────────
+  if (preview) {
+    return (
+      <div className="animate-fadeUp">
+        <InlinePreview file={preview} onBack={() => setPreview(null)} />
+      </div>
+    )
+  }
 
   return (
     <div className="animate-fadeUp">
@@ -186,11 +241,6 @@ export default function Home() {
           shown.map(f => <FileCard key={f.id} file={f} onPreview={setPreview} />)
         )}
       </div>
-
-      {/* My Private Links */}
-      <PrivateLinks />
-
-      <PreviewModal file={preview} onClose={() => setPreview(null)} />
     </div>
   )
 }
