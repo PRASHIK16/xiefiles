@@ -15,7 +15,10 @@ export default function UploadZone() {
   const [progress, setProgress] = useState(null)     // { name, pct }
 
   // OTP draft state
-  const [batch, setBatch] = useState(null)           // batch id for this OTP session
+  // batchRef is a ref (not state) — it updates synchronously so every file
+  // in the same upload batch sees the SAME id, even mid-loop. Using state
+  // here caused a stale-closure bug where each file got a different batch id.
+  const batchRef = useRef(null)
   const [drafts, setDrafts] = useState([])           // uploaded draft files (this session)
   const [sharing, setSharing] = useState(false)
   const [otpResult, setOtpResult] = useState(null)   // { otp, count }
@@ -33,10 +36,10 @@ export default function UploadZone() {
     form.append('file', file)
     form.append('visibility', mode)                  // 'public' or 'otp'
     if (mode === 'otp') {
-      // reuse the same batch for all files in this OTP session
-      const b = batch || crypto.randomUUID()
-      if (!batch) setBatch(b)
-      form.append('batch', b)
+      // Generate the batch id ONCE per session, synchronously via ref.
+      // All files uploaded before "Share" is pressed reuse this same id.
+      if (!batchRef.current) batchRef.current = crypto.randomUUID()
+      form.append('batch', batchRef.current)
     }
     const xhr = new XMLHttpRequest()
     xhr.open('POST', '/api/upload')
@@ -52,7 +55,6 @@ export default function UploadZone() {
           tokens.fileSet(res.file.id, res.uploaderToken)
           if (res.visibility === 'otp') {
             // draft — keep it locally, don't touch the public board
-            if (res.batch && !batch) setBatch(res.batch)
             setDrafts(prev => [...prev, res.file])
             setOtpResult(null)   // new upload invalidates any previous OTP for this session
           } else {
@@ -68,12 +70,12 @@ export default function UploadZone() {
   })
 
   const shareOtp = async () => {
-    if (!batch || drafts.length === 0) { toast.error('Add files first'); return }
+    if (!batchRef.current || drafts.length === 0) { toast.error('Add files first'); return }
     setSharing(true)
     try {
       const res = await fetch('/api/otp/share', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ batch }),
+        body: JSON.stringify({ batch: batchRef.current }),
       })
       const data = await res.json()
       if (data.success) {
@@ -92,7 +94,8 @@ export default function UploadZone() {
   }
 
   const resetOtp = () => {
-    setBatch(null); setDrafts([]); setOtpResult(null)
+    batchRef.current = null   // fresh batch id for the next OTP session
+    setDrafts([]); setOtpResult(null)
   }
 
   const isOtp = mode === 'otp'
@@ -214,7 +217,7 @@ export default function UploadZone() {
             </button>
           </div>
           <p className="text-[11px] text-amber-600 dark:text-amber-400">
-            ⚠ Valid for 24 hours. To access: open “Access with OTP” and enter this code.
+            ⚠ Valid for 24 hours. To access: open "Access with OTP" and enter this code.
           </p>
         </div>
       )}
