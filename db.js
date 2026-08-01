@@ -97,6 +97,8 @@ function list(opts = {}) {
  * List active PUBLIC files only — public shape (no token, no slug).
  * Private files are intentionally excluded so they never appear on the board.
  */
+
+// there are many way to which the active public path can be make centre 
 function activePublic() {
   const now = Date.now();
   return _store
