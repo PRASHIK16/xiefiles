@@ -28,6 +28,7 @@ _load();
 // ── Public API ─────────────────────────────────────────────────────
 
 /** Insert a file record */
+/**  the maiin theme of the fileis to record **/
 function insert(record) {
   _store.push({ ...record });
   _save();
