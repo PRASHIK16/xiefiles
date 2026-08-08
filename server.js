@@ -102,6 +102,7 @@ function publicFile(f) {
   return pub;
 }
 
+// the 4 digit unique generation of OTP is based on the pollverse
 // Generate a unique 4-digit OTP not currently in active use
 function makeOtp() {
   const now = Date.now();
