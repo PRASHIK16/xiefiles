@@ -1,9 +1,19 @@
 import { useState, useRef } from 'react'
-import { KeyRound, Download, Printer, Eye, Trash2, Loader2, ArrowLeft, FileDown } from 'lucide-react'
+import { KeyRound, Download, Printer, Eye, Trash2, Loader2, ArrowLeft, FileText, FileDown } from 'lucide-react'
 import { api, tokens } from '../lib/api'
-import { bytes, previewKind } from '../lib/format'
+import { bytes, previewKind, mimeLabel } from '../lib/format'
 import { useToast } from '../context/ToastContext'
 import FileIcon from '../components/files/FileIcon'
+
+// Map raw backend error text to friendlier, more actionable copy —
+// no backend change required, this is purely a display-layer mapping.
+function friendlyOtpError(message) {
+  if (!message) return 'Something went wrong. Please try again.'
+  if (/too many attempts/i.test(message)) return message // already explains the wait time
+  if (/invalid or expired/i.test(message)) return 'That code doesn’t match any files. Double-check it, or ask for a new one.'
+  if (/valid 4-digit/i.test(message)) return 'Enter all 4 digits of the code.'
+  return message
+}
 
 // ── Inline preview — fills the content area (Google Drive style) ──
 function InlinePreview({ file, otp, onBack }) {
@@ -30,11 +40,10 @@ function InlinePreview({ file, otp, onBack }) {
   }
 
   return (
-    // Fills the vertical space between header and footer, scrolls if long
     <div className="flex flex-col" style={{ height: 'calc(100vh - 140px)', minHeight: '400px' }}>
       {/* Toolbar */}
       <div className="flex items-center justify-between gap-3 mb-3 shrink-0">
-        <button onClick={onBack} className="btn btn-ghost text-sm">
+        <button onClick={onBack} className="btn btn-ghost text-sm transition-all active:scale-95">
           <ArrowLeft size={16} /> Back to files
         </button>
         <div className="flex items-center gap-1.5 min-w-0">
@@ -42,11 +51,11 @@ function InlinePreview({ file, otp, onBack }) {
             {file.original_name}
           </span>
           {canPrint && (
-            <button onClick={print} className="btn btn-ghost text-xs px-3 py-1.5">
+            <button onClick={print} className="btn btn-ghost text-xs px-3 py-1.5 transition-all active:scale-95">
               <Printer size={14} /> <span className="hidden sm:inline">Print</span>
             </button>
           )}
-          <button onClick={download} className="btn btn-primary text-xs px-3 py-1.5">
+          <button onClick={download} className="btn btn-primary text-xs px-3 py-1.5 transition-all active:scale-95">
             <Download size={14} /> <span className="hidden sm:inline">Download</span>
           </button>
         </div>
@@ -67,9 +76,11 @@ function InlinePreview({ file, otp, onBack }) {
             <FileIcon mime={file.mime_type} />
             <div>
               <p className="font-semibold text-slate-200">Preview not available</p>
-              <p className="text-sm text-slate-400 mt-1">This file type can’t be shown in the browser — download to open it.</p>
+              <p className="text-sm text-slate-400 mt-1">
+                {mimeLabel(file.mime_type)} files can’t be shown in the browser — download to open it.
+              </p>
             </div>
-            <button onClick={download} className="btn btn-primary text-sm">
+            <button onClick={download} className="btn btn-primary text-sm transition-all active:scale-95">
               <FileDown size={16} /> Download to open
             </button>
           </div>
@@ -111,14 +122,14 @@ export default function AccessOtp() {
   }
 
   const access = async () => {
-    if (otp.length !== 4) { toast.error('Enter the 4-digit code'); return }
+    if (otp.length !== 4) { toast.error('Enter all 4 digits of the code.'); return }
     setBusy(true)
     try {
       const res = await api.accessOtp(otp)
       setFiles(res.files || [])
-      if ((res.files || []).length === 0) toast.info('No files found for this code')
+      if ((res.files || []).length === 0) toast.info('No files were found for this code.')
     } catch (e) {
-      toast.error(e.message)
+      toast.error(friendlyOtpError(e.message))
       setFiles(null)
     }
     setBusy(false)
@@ -143,6 +154,7 @@ export default function AccessOtp() {
     toast.info('Opening print dialog…')
   }
 
+  // Owner-only delete — only shows if this browser uploaded the file (token present)
   const deleteFile = async (f) => {
     const token = tokens.fileGet(f.id)
     if (!token) return
@@ -152,7 +164,7 @@ export default function AccessOtp() {
       tokens.fileDel(f.id)
       setFiles(prev => prev.filter(x => x.id !== f.id))
       toast.success('File deleted')
-    } catch (e) { toast.error(e.message) }
+    } catch (e) { toast.error(friendlyOtpError(e.message)) }
   }
 
   // ── Inline preview view — replaces the list ─────────────────────
@@ -184,33 +196,47 @@ export default function AccessOtp() {
               <input key={i} ref={el => inputs.current[i] = el}
                 value={d} onChange={e => setDigit(i, e.target.value)}
                 onKeyDown={e => onKeyDown(i, e)}
+                disabled={busy}
                 inputMode="numeric" maxLength={1}
                 className="w-14 h-16 text-center text-2xl font-bold rounded-xl border-2
                            border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900
-                           outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-400/25 transition" />
+                           outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-400/25
+                           disabled:opacity-50 transition" />
             ))}
           </div>
           <button onClick={access} disabled={busy || otp.length !== 4}
-            className="btn btn-primary px-8 disabled:opacity-50">
+            className="btn btn-primary px-8 disabled:opacity-50 transition-all active:scale-[0.98]">
             {busy ? <><Loader2 size={16} className="animate-spin" /> Checking…</> : 'Access Files'}
           </button>
+          <p className="text-xs text-slate-400 text-center max-w-xs">
+            Don’t have a code? Ask whoever shared the files with you — codes are 4 digits and valid for 24 hours.
+          </p>
         </div>
       )}
 
-      {/* Results list */}
+      {/* Results */}
       {files && (
         <div>
           <div className="flex items-center justify-between mb-4">
             <p className="text-sm font-semibold">
               {files.length} file{files.length !== 1 ? 's' : ''} found
             </p>
-            <button onClick={reset} className="btn btn-ghost text-xs">
+            <button onClick={reset} className="btn btn-ghost text-xs transition-all active:scale-95">
               <ArrowLeft size={14} /> Enter another code
             </button>
           </div>
 
           {files.length === 0 ? (
-            <div className="card p-8 text-center text-slate-400">No files for this code.</div>
+            <div className="card p-8 text-center">
+              <div className="w-12 h-12 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center mx-auto mb-3">
+                <FileText size={22} className="text-slate-400" />
+              </div>
+              <p className="text-slate-500 dark:text-slate-400 font-medium">No files found for this code.</p>
+              <p className="text-xs text-slate-400 mt-1">Double-check the digits, or ask the sender for a new code.</p>
+              <button onClick={reset} className="btn btn-ghost text-xs mt-4 transition-all active:scale-95">
+                Try another code
+              </button>
+            </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {files.map(f => {
@@ -226,18 +252,18 @@ export default function AccessOtp() {
                       </div>
                     </div>
                     <div className="flex flex-wrap gap-1.5">
-                      <button onClick={() => setPreview(f)} className="btn btn-primary text-xs px-3 py-1.5">
+                      <button onClick={() => setPreview(f)} className="btn btn-primary text-xs px-3 py-1.5 transition-all active:scale-95">
                         <Eye size={14} /> Preview
                       </button>
                       <button onClick={() => { window.location.href = api.otpDownloadUrl(f.id, otp) }}
-                        className="btn btn-ghost text-xs px-3 py-1.5">
+                        className="btn btn-ghost text-xs px-3 py-1.5 transition-all active:scale-95">
                         <Download size={14} /> Download
                       </button>
-                      <button onClick={() => printFile(f)} className="btn btn-ghost text-xs px-3 py-1.5">
+                      <button onClick={() => printFile(f)} className="btn btn-ghost text-xs px-3 py-1.5 transition-all active:scale-95">
                         <Printer size={14} /> Print
                       </button>
                       {isOwner && (
-                        <button onClick={() => deleteFile(f)} className="btn btn-danger text-xs px-2.5 py-1.5" aria-label="Delete">
+                        <button onClick={() => deleteFile(f)} className="btn btn-danger text-xs px-2.5 py-1.5 transition-all active:scale-95" aria-label="Delete">
                           <Trash2 size={14} />
                         </button>
                       )}
